@@ -55,7 +55,7 @@ logs
 runs
 
 # codex
-*.codex
+.codex
 
 # other
 *.egg-info
