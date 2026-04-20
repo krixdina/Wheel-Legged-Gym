@@ -54,6 +54,9 @@ Thumbs.db
 logs
 runs
 
+# codex
+*.codex
+
 # other
 *.egg-info
 __pycache__
