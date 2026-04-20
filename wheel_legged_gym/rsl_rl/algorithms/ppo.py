@@ -124,7 +124,7 @@ class PPO:
         ).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
         self.transition.action_sigma = self.actor_critic.action_std.detach()
-        
+
         # need to record obs and critic_obs before env.step()
         # 缓存执行动作前的观测；环境执行动作后会返回下一时刻观测，PPO 需要用动作前后的状态组成一条转移。
         self.transition.observations = obs.clone()
@@ -160,6 +160,8 @@ class PPO:
         mean_value_loss = 0
         mean_surrogate_loss = 0
         mean_kl = 0
+
+        # 这里只创建生成器，不执行函数体内的任何逻辑
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(
                 self.num_mini_batches, self.num_learning_epochs
@@ -168,6 +170,28 @@ class PPO:
             generator = self.storage.mini_batch_generator(
                 self.num_mini_batches, self.num_learning_epochs
             )
+        # yield 让 mini_batch_generator(...) 变成一个可以被 for 循环逐批使用的数据生成器，
+        # 每次产出一个 mini-batch，PPO 每拿到一个 mini-batch 就做一次损失计算和参数更新。
+        #
+        # 调用 mini_batch_generator(...) -> 只得到 generator 对象，函数体还没真正运行
+        #
+        # 进入 for (...) in generator
+        # -> 第一次 next(generator)，next(generator) 的意思是，
+        #    运行 generator 内部的 mini_batch_generator(...) 函数体，直到遇到 yield 语句为止
+        # -> flatten 各种 rollout 数据
+        # -> 进入 epoch 和 mini-batch 循环
+        # -> 生成第 1 个 obs_batch/actions_batch/...
+        # -> yield 第 1 个 batch，然后暂停
+        #
+        # for 循环体执行 PPO 更新
+        # -> 用第 1 个 batch 算 loss、反向传播、更新参数
+        #
+        # for 进入下一轮
+        # -> 第二次 next(generator)
+        # -> 从上一次 yield 后面继续执行，直到遇到下一个 yield
+        #
+        # 如此重复
+
         for (
             obs_batch,
             obs_history_batch,
@@ -179,8 +203,8 @@ class PPO:
             old_actions_log_prob_batch,
             old_mu_batch,
             old_sigma_batch,
-            hid_states_batch,
-            masks_batch,
+            hid_states_batch,  # 仅循环网络使用，非循环网络时为 None
+            masks_batch,       # 仅循环网络使用，非循环网络时为 None
         ) in generator:
             if self.actor_critic.is_sequence:
                 self.actor_critic.act(
