@@ -260,7 +260,7 @@ class RolloutStorage:
         if self.privileged_observations is not None:
             critic_observations = self.privileged_observations.flatten(0, 1)
         else:
-            critic_observations = observations
+            critic_observations = self.observations.flatten(0, 1)
         obs_history = self.observation_history.flatten(0, 1)
 
         for epoch in range(num_epochs):
