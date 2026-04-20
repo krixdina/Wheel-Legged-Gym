@@ -12,18 +12,18 @@ from wheel_legged_gym.rsl_rl.utils import split_and_pad_trajectories
 class RolloutStorage:
     class Transition:
         def __init__(self):
-            self.observations = None
-            self.critic_observations = None
-            self.next_observations = None
-            self.observation_history = None
-            self.actions = None
-            self.rewards = None
-            self.dones = None
-            self.values = None
-            self.actions_log_prob = None
-            self.action_mean = None
-            self.action_sigma = None
-            self.hidden_states = None
+            self.observations = None           # actor 在执行动作前看到的当前观测
+            self.critic_observations = None    # critic 估计价值时使用的观测，可能包含特权信息
+            self.next_observations = None      # 执行动作后环境返回的下一时刻观测
+            self.observation_history = None    # 当前时刻的历史观测序列，供序列策略编码 latent
+            self.actions = None                # 当前策略根据当前观测采样得到的动作
+            self.rewards = None                # 环境执行动作后返回的即时奖励
+            self.dones = None                  # 当前步后各并行环境是否结束 episode
+            self.values = None                 # critic 对当前状态估计的价值 V(s)
+            self.actions_log_prob = None       # 采样动作在旧策略分布下的对数概率
+            self.action_mean = None            # 旧策略动作分布的均值，用于 PPO 更新时计算 KL
+            self.action_sigma = None           # 旧策略动作分布的标准差，用于 PPO 更新时计算 KL
+            self.hidden_states = None          # 循环策略的隐藏状态，用于 RNN/GRU 类策略训练
 
         def clear(self):
             self.__init__()
@@ -45,6 +45,9 @@ class RolloutStorage:
         self.actions_shape = actions_shape
 
         # Core
+        # T = num_transitions_per_env，也就是每个环境采样多少步
+        # N = num_envs，也就是并行环境数量
+        # T * N = PPO 用来训练的总 batch size
         self.observations = torch.zeros(
             num_transitions_per_env, num_envs, *obs_shape, device=self.device
         )
@@ -122,6 +125,8 @@ class RolloutStorage:
         self._save_hidden_states(transition.hidden_states)
         self.step += 1
 
+    # _save_hidden_states 每次 add_transitions 都会被调用；
+    # 但如果当前策略不是循环神经网络，它会立刻 return，不做任何事情。
     def _save_hidden_states(self, hidden_states):
         if hidden_states is None or hidden_states == (None, None):
             return
@@ -158,7 +163,8 @@ class RolloutStorage:
 
     def clear(self):
         self.step = 0
-
+    
+    # GAE and advantage normalization
     def compute_returns(self, last_values, gamma, lam):
         advantage = 0
         for step in reversed(range(self.num_transitions_per_env)):
@@ -181,9 +187,14 @@ class RolloutStorage:
             self.advantages.std() + 1e-8
         )
 
+    # 作用：根据当前缓存的一批采样数据，统计平均轨迹长度和平均单步奖励。
+    # 输入：self 表示当前 rollout 缓冲区对象，内部保存了每个采样时间步、每个并行环境的结束标记和奖励。
+    # 输出：返回两个统计量；第一个是由结束标记分割出的平均轨迹长度，第二个是当前 rollout 中所有奖励的平均值。
     def get_statistics(self):
+        # 将最后一个采样时间步强制视为轨迹结束点，保证即使某些环境没有自然结束，也能形成可统计的片段。
         done = self.dones
         done[-1] = 1
+        # 把结束标记从“时间步优先”的布局转换成“环境优先”的一维序列，便于按每个环境连续查找结束位置。
         flat_dones = done.permute(1, 0, 2).reshape(-1, 1)
         done_indices = torch.cat(
             (
@@ -191,6 +202,7 @@ class RolloutStorage:
                 flat_dones.nonzero(as_tuple=False)[:, 0],
             )
         )
+        # 相邻结束位置的距离就是一段轨迹的长度，最后返回这些长度的平均值和整批奖励的平均值。
         trajectory_lengths = done_indices[1:] - done_indices[:-1]
         return trajectory_lengths.float().mean(), self.rewards.mean()
 

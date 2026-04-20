@@ -59,17 +59,28 @@ class OnPolicyRunner:
         else:
             num_critic_obs = self.env.num_obs
         actor_critic_class = eval(self.cfg["policy_class_name"])  # ActorCritic
+        
         if self.cfg["policy_class_name"] == "ActorCriticSequence":
             num_critic_obs += self.policy_cfg["latent_dim"]
+
         actor_critic: ActorCritic = actor_critic_class(
             self.env.num_obs, num_critic_obs, self.env.num_actions, **self.policy_cfg
         ).to(self.device)
+
+        # 将配置中的算法类名字符串解析为当前作用域中的类对象，从字符串"PPO" -> PPO 类。
         alg_class = eval(self.cfg["algorithm_class_name"])  # PPO
         self.alg: PPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
 
         # init storage and model
+        # 有多少个并行环境
+        # 每轮采样多少步
+        # 每个 observation 多大
+        # critic observation 多大
+        # 历史 observation 多大
+        # action 多大
+        # 初始化 rollout 存储器，方便后面收集一批轨迹再进行统一训练
         self.alg.init_storage(
             self.env.num_envs,
             self.num_steps_per_env,
@@ -88,14 +99,25 @@ class OnPolicyRunner:
 
         _, _ = self.env.reset()
 
+    # 作用：执行 PPO 的主训练循环，循环中先收集一批环境交互数据，再计算回报并更新策略网络。
+    # 输入：num_learning_iterations 表示本次调用要进行多少轮策略更新；
+    #      init_at_random_ep_len 表示是否把各并行环境的初始回合长度打散，用来避免所有环境同步结束。
+    # 输出：没有返回值；它会更新策略网络、价值网络、日志统计、checkpoint 文件和当前训练迭代位置。
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer
         if self.log_dir is not None and self.writer is None:
             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
+
         if init_at_random_ep_len:
+            # episode_length_buf 这个列表中的每个元素都是一个并行环境的回合计步器，后续环境每 step 一次都会让它加一。
+            # 这里随机化的只是“当前回合已经运行了多少步”，不会改变机器人的真实物理状态。
+            # 不同环境的计步器初值不同，就会在不同时间达到最大回合长度，从而避免所有环境同步超时重置。
+            # 生成一个和 episode_length_buf 形状相同的随机整数张量，随机值范围是：[0, max_episode_length)
             self.env.episode_length_buf = torch.randint_like(
                 self.env.episode_length_buf, high=int(self.env.max_episode_length)
             )
+
+        # 获取训练开始时的环境观测，并选择供价值网络使用的观测；若环境提供特权观测，价值网络优先使用它。
         obs, obs_history = self.env.get_observations()
         privileged_obs = self.env.get_privileged_observations()
         critic_obs = privileged_obs if privileged_obs is not None else obs
@@ -106,6 +128,7 @@ class OnPolicyRunner:
         )
         self.alg.actor_critic.train()  # switch to train mode (for dropout for example)
 
+        # 准备日志统计缓存，用于记录最近结束回合的奖励、长度以及环境额外返回的 episode 指标。
         ep_infos = []
         rewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
@@ -121,6 +144,7 @@ class OnPolicyRunner:
             start = time.time()
             # Rollout
             with torch.inference_mode():
+                # 用当前策略在所有并行环境中采样固定步数，并把每一步转移数据存入 PPO 的 rollout 缓冲区。
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, obs_history, critic_obs)
                     obs, privileged_obs, rewards, dones, infos, obs_history = (
@@ -138,6 +162,7 @@ class OnPolicyRunner:
 
                     if self.log_dir is not None:
                         # Book keeping
+                        # 只在写日志时维护回合级统计；某个环境结束后，把它的累计奖励和累计长度放入滑动窗口。
                         if "episode" in infos:
                             ep_infos.append(infos["episode"])
                         cur_reward_sum += rewards
@@ -157,6 +182,7 @@ class OnPolicyRunner:
 
                 # Learning step
                 start = stop
+                # 为价值网络准备最后一个状态的观测，用于估计采样片段末尾之后的价值并计算优势函数。
                 if self.cfg["policy_class_name"] == "ActorCriticSequence":
                     critic_obs__ = torch.cat(
                         (critic_obs, self.alg.actor_critic.encode(obs_history)), dim=-1
@@ -170,21 +196,30 @@ class OnPolicyRunner:
             )
             stop = time.time()
             learn_time = stop - start
+            # 完成一轮更新后记录训练曲线、打印终端摘要，并按间隔保存当前模型。
             if self.log_dir is not None:
+                # 以字典形式将当前循环的局部变量传入 log()
                 self.log(locals())
             if it % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir, "model_{}.pt".format(it)))
             ep_infos.clear()
+        # 记录本次训练结束后的迭代位置，并额外保存一个最终 checkpoint。
         self.current_learning_iteration = num_learning_iterations
         self.save(
             os.path.join(self.log_dir, "model_{}.pt".format(num_learning_iterations))
         )
 
+    # 作用：在每次策略更新后汇总训练指标，同时写入 TensorBoard 并打印到终端。
+    # 输入：locs 是 learn() 当前循环的局部变量字典，里面包含本轮采样耗时、学习耗时、损失、
+    #      回合奖励缓存和回合长度缓存；width 和 pad 控制终端日志的显示宽度与对齐间距。
+    # 输出：没有返回值；它会更新累计步数和累计时间，并通过 writer 记录曲线、通过 print 输出日志。
     def log(self, locs, width=80, pad=35):
+        # 统计到目前为止已经采样的环境交互步数和真实耗时，用于展示训练进度与预计剩余时间。
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
         self.tot_time += locs["collection_time"] + locs["learn_time"]
         iteration_time = locs["collection_time"] + locs["learn_time"]
 
+        # 汇总环境在 episode 结束时返回的指标，例如各奖励项或任务统计量，并记录每个指标的平均值。
         ep_string = f""
         if locs["ep_infos"]:
             for key in locs["ep_infos"][0]:
@@ -199,6 +234,7 @@ class OnPolicyRunner:
                 value = torch.mean(infotensor)
                 self.writer.add_scalar("Episode/" + key, value, locs["it"])
                 ep_string += f"""{f'Mean {key}:':>{pad}} {value:.4f}\n"""
+        # 计算策略动作分布的平均噪声大小和本轮训练速度，用于观察探索强度与训练性能。
         mean_std = self.alg.actor_critic.std.mean()
         fps = int(
             self.num_steps_per_env
@@ -206,6 +242,7 @@ class OnPolicyRunner:
             / (locs["collection_time"] + locs["learn_time"])
         )
 
+        # 将损失、学习率、策略分布、KL 散度和性能耗时写入 TensorBoard，方便训练过程中画曲线观察。
         self.writer.add_scalar(
             "Loss/value_function", locs["mean_value_loss"], locs["it"]
         )
@@ -231,6 +268,7 @@ class OnPolicyRunner:
                 locs["it"],
             )
 
+        # 组装终端中显示的训练摘要；有完整 episode 结束时才会额外显示平均回合奖励和平均回合长度。
         str = f" \033[1m Learning iteration {locs['it']}/{locs['num_learning_iterations']} \033[0m "
 
         if len(locs["rewbuffer"]) > 0:
@@ -261,6 +299,7 @@ class OnPolicyRunner:
             #   f"""{'Mean length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
 
         log_string += ep_string
+        # 在日志末尾追加累计交互步数、单轮耗时、总耗时和按当前平均速度估算的剩余时间。
         log_string += (
             f"""{'-' * width}\n"""
             f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
@@ -271,6 +310,9 @@ class OnPolicyRunner:
         )
         print(log_string)
 
+    # 作用：把当前策略网络、优化器状态和训练迭代位置保存成 checkpoint 文件，供之后续训或评估加载。
+    # 输入：path 表示 checkpoint 保存路径；infos 表示调用方希望一并保存的额外信息，可以为空。
+    # 输出：没有返回值；结果是磁盘上生成一个包含模型参数、优化器状态和迭代编号的文件。
     def save(self, path, infos=None):
         torch.save(
             {
@@ -282,6 +324,9 @@ class OnPolicyRunner:
             path,
         )
 
+    # 作用：从 checkpoint 文件恢复策略网络参数，并可选择是否恢复优化器状态，让训练能从保存点继续。
+    # 输入：path 表示 checkpoint 文件路径；load_optimizer 表示是否恢复优化器内部状态，续训时通常需要恢复。
+    # 输出：返回 checkpoint 中保存的额外信息，同时更新当前 runner 记录的训练迭代位置。
     def load(self, path, load_optimizer=True):
         loaded_dict = torch.load(path)
         self.alg.actor_critic.load_state_dict(loaded_dict["model_state_dict"])
@@ -290,6 +335,9 @@ class OnPolicyRunner:
         self.current_learning_iteration = loaded_dict["iter"]
         return loaded_dict["infos"]
 
+    # 作用：取得用于测试或部署的策略推理函数，只根据观测输出动作，不执行训练更新。
+    # 输入：device 表示希望把策略网络移动到哪个计算设备；为空时保持当前设备不变。
+    # 输出：返回 actor_critic 中的推理接口，play.py 会用它在环境中直接计算动作。
     def get_inference_policy(self, device=None):
         self.alg.actor_critic.eval()  # switch to evaluation mode (dropout for example)
         if device is not None:

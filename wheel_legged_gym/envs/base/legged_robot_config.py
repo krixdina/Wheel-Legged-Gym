@@ -261,7 +261,8 @@ class LeggedRobotCfg(BaseConfig):
 class LeggedRobotCfgPPO(BaseConfig):
     seed = 1
     runner_class_name = "OnPolicyRunner"
-
+    
+    # 策略网络和价值网络的结构
     class policy:
         init_noise_std = 0.5
         actor_hidden_dims = [128, 64, 32]
@@ -274,7 +275,8 @@ class LeggedRobotCfgPPO(BaseConfig):
         )
         latent_dim = 3  # at least 3 to estimate base linear velocity
         encoder_hidden_dims = [128, 64]
-
+    
+    # PPO 算法超参数
     class algorithm:
         # training params
         value_loss_coef = 1.0
@@ -291,7 +293,8 @@ class LeggedRobotCfgPPO(BaseConfig):
         max_grad_norm = 1.0
 
         extra_learning_rate = 1e-3
-
+    
+    # 训练流程控制参数
     class runner:
         policy_class_name = (
             "ActorCriticSequence"  # could be ActorCritic, ActorCriticSequence

@@ -63,7 +63,8 @@ class BaseTask:
         self.num_privileged_obs = cfg.env.num_privileged_obs
         self.num_actions = cfg.env.num_actions
         self.obs_history_length = cfg.env.obs_history_length
-
+        
+        # Just-In-Time Compilation，即“即时编译”。
         # optimization flags for pytorch JIT
         torch._C._jit_set_profiling_mode(False)
         torch._C._jit_set_profiling_executor(False)
@@ -138,6 +139,10 @@ class BaseTask:
         """Reset selected robots"""
         raise NotImplementedError
 
+    # 父类负责定义：先 reset，再 step 一次，再返回观测的统一流程
+    # 子类负责实现：具体怎么 reset 和 具体怎么 step
+    # reset() 虽然是父类方法，但它调用的是 self.reset_idx(...) 和 self.step(...)。
+    # Python 会根据 self 的真实类型做动态分派。
     def reset(self):
         """Reset all robots"""
         self.reset_idx(torch.arange(self.num_envs, device=self.device))

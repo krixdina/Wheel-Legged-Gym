@@ -37,13 +37,17 @@ from wheel_legged_gym.envs import *
 from wheel_legged_gym.utils import get_args, task_registry
 import torch
 
-
+# 训练链路：TaskRegistry -> OnPolicyRunner -> ActorCriticSequence + PPO
 def train(args):
     env, env_cfg = task_registry.make_env(name=args.task, args=args)
+
+    # make_alg_runner()创建rsl_rl的runner
     ppo_runner, train_cfg = task_registry.make_alg_runner(
         env=env, name=args.task, args=args
     )
     task_registry.save_cfgs(name=args.task)
+
+    # 开始真正的执行rollout和PPO更新
     ppo_runner.learn(
         num_learning_iterations=train_cfg.runner.max_iterations,
         init_at_random_ep_len=True,

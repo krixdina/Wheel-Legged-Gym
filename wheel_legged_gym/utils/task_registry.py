@@ -59,7 +59,13 @@ class TaskRegistry:
         self.task_classes = {}
         self.env_cfgs = {}
         self.train_cfgs = {}
-
+    # task_classes 的类型为 LeggedRobot、LeggedRobotVMC 等环境类，但此处标注的却是 VecEnv
+    # 这里的 VecEnv 只是类型标注，用来表达 task_class 是“能创建并行强化学习环境的类”。
+    # 注册时传入的通常是 LeggedRobot 这样的环境类本身，而不是 VecEnv。
+    # 虽然类型不符，但 Python 默认不会在运行时检查这个标注，也不会自动调用 VecEnv；register() 这里只是把类保存到字典里。
+    # LeggedRobot 继承自 BaseTask 而不是 VecEnv，但它实际提供了 runner 需要的 reset、step、get_observations 等接口，
+    # 因此后续 make_env() 取出这个类并实例化时可以正常工作。
+    # 所以此处的类型标注主要是想说明: 如果一个环境要想接入 OnPolicyRunner，至少应该像 VecEnv 这样提供属性和方法。
     def register(
         self,
         name: str,
@@ -142,6 +148,9 @@ class TaskRegistry:
         # parse sim params (convert to dict first)
         sim_params = {"sim": class_to_dict(env_cfg.sim)}
         sim_params = parse_sim_params(args, sim_params)
+        # task_class 表示任务类别，例如 LeggedRobot 或 LeggedRobotVMC；
+        # 这个类在真正创建环境时还需要仿真参数、运行设备等信息，所以会在 make_env() 函数中实例化这个类。
+        # 一个环境要想接入 OnPolicyRunner，至少应该像 VecEnv 这样提供属性和方法。
         env = task_class(
             cfg=env_cfg,
             sim_params=sim_params,
@@ -150,11 +159,16 @@ class TaskRegistry:
             headless=args.headless,
         )
         return env, env_cfg
-
+    
+    # make_algorithm_runner 
+    # 实现训练过程中的算法调用逻辑：
+    # 1.根据配置选择算法类，例如 PPO
+    # 2.再创建对应的 runner，例如 OnPolicyRunner
+    # 3.把环境、算法配置、日志目录等组装起来
     def make_alg_runner(
         self, env, name=None, args=None, train_cfg=None, log_root="default"
     ) -> Tuple[OnPolicyRunner, LeggedRobotCfgPPO]:
-        """Creates the training algorithm  either from a registered namme or from the provided config file.
+        """Creates the training algorithm  either from a registered name or from the provided config file.
 
         Args:
             env (isaacgym.VecTaskPython): The environment to train (TODO: remove from within the algorithm)
@@ -218,6 +232,7 @@ class TaskRegistry:
             env, train_cfg_dict, self.log_dir, device=args.rl_device
         )
         # save resume path before creating a new log_dir
+        # 如果要求当前训练从之前的 checkpoint 恢复，就寻找之前训练的模型文件路径，并加载到 runner 中
         resume = train_cfg.runner.resume
         if resume:
             # load previously trained model

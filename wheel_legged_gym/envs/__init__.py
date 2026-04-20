@@ -46,6 +46,12 @@ import os
 
 from wheel_legged_gym.utils.task_registry import task_registry
 
+# 通过 register() 将所有环境类和配置对象注册到 task_registry 中（存储在对应的字典中）
+# 训练时会根据命令行指定的任务名在字典中查找对应的环境类和配置对象，并创建仿真环境和 PPO 训练器。
+# 在注册表中建立“任务名 -> 环境构造器 -> 环境配置对象 -> 训练配置对象”的映射。
+# 第二个参数传入的是环境类本身，而不是环境实例；真正创建环境时还需要仿真参数、
+# 运行设备等信息，所以会在 task_registry.make_env() 中再调用这个类来实例化。
+# 后两个参数是配置对象，注册时就可以直接创建，用来保存环境参数和 PPO 训练参数。
 task_registry.register(
     "wheel_legged", LeggedRobot, WheelLeggedCfg(), WheelLeggedCfgPPO()
 )
@@ -54,7 +60,7 @@ task_registry.register(
 )
 task_registry.register(
     "wheel_legged_vmc_flat",
-    LeggedRobotVMC,
-    WheelLeggedVMCFlatCfg(),
-    WheelLeggedVMCFlatCfgPPO(),
+    LeggedRobotVMC,  # 环境类作为稍后创建仿真环境的入口，此处不要加括号提前实例化。
+    WheelLeggedVMCFlatCfg(),  # 环境配置对象，保存地形、观测、奖励等任务参数。
+    WheelLeggedVMCFlatCfgPPO(),  # 训练配置对象，保存策略网络、PPO 算法和 runner 参数。
 )

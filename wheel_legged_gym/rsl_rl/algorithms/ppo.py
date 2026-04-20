@@ -98,23 +98,35 @@ class PPO:
     def train_mode(self):
         self.actor_critic.train()
 
+    # 作用：在 rollout 采样阶段根据当前观测生成动作，并暂存 PPO 更新所需的旧策略信息和价值估计。
+    # 输入：obs 表示 actor 当前可见的普通观测；obs_history 表示一段历史观测，供带编码器的策略提取隐含状态；
+    #      critic_obs 表示 critic 用来估计状态价值的观测，启用特权观测时会比 actor 看到的信息更多。
+    # 输出：返回当前策略采样得到的动作；同时把动作、价值、动作概率和相关观测写入临时转移对象。
     def act(self, obs, obs_history, critic_obs):
+
+        # 如果当前策略是循环网络，先保存 actor 和 critic 的隐藏状态，后续写入 rollout 缓冲区用于按轨迹训练。
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
+
         # Compute the actions and values
+        # 序列策略会从历史观测中编码出 latent 隐变量，actor 用它辅助生成动作，critic 也拼接它来估计价值。
         if self.actor_critic.is_sequence:
             self.transition.actions = self.actor_critic.act(obs, obs_history).detach()
             latent = self.actor_critic.get_latent()
             critic_obs = torch.cat((critic_obs, latent), dim=-1)
         else:
             self.transition.actions = self.actor_critic.act(obs).detach()
+
+        # 用 critic 观测估计当前状态价值，并记录采样动作在旧策略分布下的概率信息，供之后计算 PPO 损失。
         self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(
             self.transition.actions
         ).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
         self.transition.action_sigma = self.actor_critic.action_std.detach()
+        
         # need to record obs and critic_obs before env.step()
+        # 缓存执行动作前的观测；环境执行动作后会返回下一时刻观测，PPO 需要用动作前后的状态组成一条转移。
         self.transition.observations = obs.clone()
         self.transition.observation_history = obs_history.clone()
         self.transition.critic_observations = critic_obs.clone()

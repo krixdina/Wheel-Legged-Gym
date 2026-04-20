@@ -40,19 +40,65 @@ from wheel_legged_gym import WHEEL_LEGGED_GYM_ROOT_DIR, WHEEL_LEGGED_GYM_ENVS_DI
 
 
 def class_to_dict(obj) -> dict:
+    # 功能：把“类/对象形式的配置”递归转换成普通 dict。
+    #
+    # 在本项目中，配置常写成类似下面这种“类里套类”的形式：
+    #   class Config:
+    #       seed = 1
+    #
+    #       class sim:
+    #           dt = 0.005
+    #
+    #       class terrain:
+    #           measured_points_x = [-0.5, 0.0, 0.5]
+    #
+    # class_to_dict(Config) 期望得到类似：
+    #   {
+    #       "seed": 1,
+    #       "sim": {"dt": 0.005},
+    #       "terrain": {"measured_points_x": [-0.5, 0.0, 0.5]},
+    #   }
+
+    # 如果 obj 没有 __dict__，说明它通常已经是基础类型值
+    # （如 int/float/str/bool 这些基础的类），而不是还可以继续展开的类的配置对象。
+    # 这时递归到叶子节点，直接返回该值本身。
     if not hasattr(obj, "__dict__"):
         return obj
+    # result 用来保存当前对象转换后的字典结果：
+    # key 是属性名，value 是属性值递归展开后的结果。
     result = {}
+
+    # dir(obj) 会列出 obj 上可访问的所有属性名。
+    # 对配置类来说，这相当于枚举它有哪些“成员/字段”。
     for key in dir(obj):
+        # 以下划线开头的名字通常是 Python 的内部属性或约定为非公开属性，
+        # 例如 __class__、__dict__、__module__ 等。
+        # 这些不是我们想导出的配置项，所以直接跳过。
         if key.startswith("_"):
             continue
+
+        # element 表示当前属性转换后的结果。
+        # 注意：Python 变量没有固定类型；它一开始是 list，
+        # 但在非列表分支里可能会变成 int、float、str 或 dict。
         element = []
+        # dir(obj) 得到的是一堆字符串形式的属性名。
+        # 如["seed", "sim", "terrain"]
+        # 此时程序只知道属性名字符串，还未拿到这些属性对应的值。需要通过 getattr(obj, key) 来获取属性值。
         val = getattr(obj, key)
+
         if isinstance(val, list):
+            # 如果属性值是 list，就逐个递归处理列表元素。
+            # 这样可以兼容 [1, 2, 3]，也可以兼容 [某个配置对象, 另一个配置对象]。
             for item in val:
                 element.append(class_to_dict(item))
         else:
+            # 如果属性值不是 list，仍然递归处理：
+            # - 遇到 seed = 1 这种基础值，会在函数开头直接返回 1
+            # - 遇到 sim/terrain 这种子配置类，会继续展开为子字典
             element = class_to_dict(val)
+
+        # 把当前属性名和转换后的值写入结果字典。
+        # 例如 result["seed"] = 1，result["sim"] = {"dt": 0.005}
         result[key] = element
     return result
 
