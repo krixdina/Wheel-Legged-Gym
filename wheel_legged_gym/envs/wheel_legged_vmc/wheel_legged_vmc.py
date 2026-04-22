@@ -139,11 +139,11 @@ class LeggedRobotVMC(LeggedRobot):
         self.base_ang_vel[:] = quat_rotate_inverse(
             self.base_quat, self.root_states[:, 10:13]
         )
-        self.dof_acc = (self.last_dof_vel - self.dof_vel) / self.dt
-
         self.projected_gravity[:] = quat_rotate_inverse(
             self.base_quat, self.gravity_vec
         )
+        self.dof_acc = (self.last_dof_vel - self.dof_vel) / self.dt
+
 
         self._post_physics_step_callback()
 
