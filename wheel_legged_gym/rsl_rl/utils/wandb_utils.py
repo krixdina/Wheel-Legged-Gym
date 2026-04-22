@@ -12,7 +12,7 @@ try:
 except ModuleNotFoundError:
     raise ModuleNotFoundError("Wandb is required to log to Weights and Biases.")
 
-
+# 当前项目中未调用
 class WandbSummaryWriter(SummaryWriter):
     """Summary writer for Weights and Biases."""
 

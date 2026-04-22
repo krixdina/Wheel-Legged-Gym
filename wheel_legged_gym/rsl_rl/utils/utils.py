@@ -9,6 +9,7 @@ import pathlib
 import torch
 
 
+# 为 RNN 策略训练准备序列 mini-batch。把轨迹整理成 RNN 好处理的格式
 def split_and_pad_trajectories(tensor, dones):
     """Splits trajectories at done indices. Then concatenates them and pads with zeros up to the length og the longest trajectory.
     Returns masks corresponding to valid parts of the trajectories
@@ -47,7 +48,7 @@ def split_and_pad_trajectories(tensor, dones):
     trajectory_masks = trajectory_lengths > torch.arange(0, tensor.shape[0], device=tensor.device).unsqueeze(1)
     return padded_trajectories, trajectory_masks
 
-
+# 把 RNN 输出再变回普通样本格式
 def unpad_trajectories(trajectories, masks):
     """Does the inverse operation of  split_and_pad_trajectories()"""
     # Need to transpose before and after the masking to have proper reshaping
@@ -57,7 +58,7 @@ def unpad_trajectories(trajectories, masks):
         .transpose(1, 0)
     )
 
-
+# 当前项目未调用
 def store_code_state(logdir, repositories) -> list:
     git_log_dir = os.path.join(logdir, "git")
     os.makedirs(git_log_dir, exist_ok=True)

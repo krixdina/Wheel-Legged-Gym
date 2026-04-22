@@ -12,7 +12,7 @@ try:
 except ModuleNotFoundError:
     raise ModuleNotFoundError("neptune-client is required to log to Neptune.")
 
-
+# 当前项目未调用
 class NeptuneLogger:
     def __init__(self, project, token):
         self.run = neptune.init_run(project=project, api_token=token)

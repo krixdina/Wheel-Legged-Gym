@@ -20,7 +20,7 @@ class RolloutStorage:
             self.actions = None  # 当前策略根据当前观测采样得到的动作
             self.rewards = None  # 环境执行动作后返回的即时奖励
             self.dones = None  # 当前步后各并行环境是否结束 episode
-            self.values = None  # critic 对当前状态估计的价值 V(s)
+            self.values = None  # 全部由 critic 计算得出，为 critic 对当前状态估计的价值 V(s)
             self.actions_log_prob = None  # 采样动作在旧策略分布下的对数概率
             self.action_mean = None  # 旧策略动作分布的均值，用于 PPO 更新时计算 KL
             self.action_sigma = None  # 旧策略动作分布的标准差，用于 PPO 更新时计算 KL
@@ -127,6 +127,7 @@ class RolloutStorage:
         self.step = 0
 
     # GAE and advantage normalization
+    # last_values 是当前轨迹 rollout 结束时 critic 对最后一个状态的价值估计
     def compute_returns(self, last_values, gamma, lam):
         advantage = 0
         for step in reversed(range(self.num_transitions_per_env)):
@@ -201,6 +202,7 @@ class RolloutStorage:
                 obs_history_batch = observations_history[batch_idx]
                 critic_observations_batch = critic_observations[batch_idx]
                 actions_batch = actions[batch_idx]
+                # 取出采样时旧 critic 给出的价值估计，后续 PPO 用它限制 value function 单次更新幅度。
                 target_values_batch = values[batch_idx]
                 returns_batch = returns[batch_idx]
                 old_actions_log_prob_batch = old_actions_log_prob[batch_idx]

@@ -59,7 +59,7 @@ class OnPolicyRunner:
         else:
             num_critic_obs = self.env.num_obs
         actor_critic_class = eval(self.cfg["policy_class_name"])  # ActorCritic
-        
+
         if self.cfg["policy_class_name"] == "ActorCriticSequence":
             num_critic_obs += self.policy_cfg["latent_dim"]
 
@@ -100,7 +100,7 @@ class OnPolicyRunner:
         _, _ = self.env.reset()
 
     # 作用：执行 PPO 的主训练循环，循环中先收集一批环境交互数据，再计算回报并更新策略网络。
-    # 输入：num_learning_iterations 表示本次调用要进行多少轮策略更新；
+    # 输入：num_learning_iterations 表示本次调用要进行多少轮迭代，迭代的过程包括两步，数据采集和网络更新；
     #      init_at_random_ep_len 表示是否把各并行环境的初始回合长度打散，用来避免所有环境同步结束。
     # 输出：没有返回值；它会更新策略网络、价值网络、日志统计、checkpoint 文件和当前训练迭代位置。
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
@@ -113,6 +113,16 @@ class OnPolicyRunner:
             # 这里随机化的只是“当前回合已经运行了多少步”，不会改变机器人的真实物理状态。
             # 不同环境的计步器初值不同，就会在不同时间达到最大回合长度，从而避免所有环境同步超时重置。
             # 生成一个和 episode_length_buf 形状相同的随机整数张量，随机值范围是：[0, max_episode_length)
+            #
+            # 这个计步器后续主要在环境内部被用于：
+            # - 判断是否达到单回合最大步数，从而置位 time_out_buf；
+            # - 按固定时间间隔决定哪些环境需要重新采样 commands。
+            #
+            # max_episode_length 表示“一个 episode 最多允许多少个环境控制步”，
+            # 它在环境初始化时按 ceil(episode_length_s / dt) 计算得到。
+            # 以当前默认配置为例：
+            # episode_length_s = 20 秒，sim.dt = 0.005 秒，decimation = 2，
+            # 所以环境步长 dt = 0.01 秒，max_episode_length = ceil(20 / 0.01) = 2000。
             self.env.episode_length_buf = torch.randint_like(
                 self.env.episode_length_buf, high=int(self.env.max_episode_length)
             )
@@ -145,6 +155,7 @@ class OnPolicyRunner:
             # Rollout
             with torch.inference_mode():
                 # 用当前策略在所有并行环境中采样固定步数，并把每一步转移数据存入 PPO 的 rollout 缓冲区。
+                # num_steps_per_env 用于表示每次执行 PPO 更新前要在每个环境中采集多少步数据；不是 max_episode_length 表示的回合上限步数
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, obs_history, critic_obs)
                     obs, privileged_obs, rewards, dones, infos, obs_history = (

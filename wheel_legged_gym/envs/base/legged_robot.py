@@ -84,37 +84,117 @@ class LeggedRobot(BaseTask):
         self._prepare_reward_function()
         self.init_done = True
 
+    # 作用：
+    # 这个函数是轮腿机器人环境在运行阶段的单步推进入口。
+    # 它负责接收当前策略给出的动作，经过裁剪和延迟处理后转换为关节力矩，
+    # 再推动底层物理仿真前进若干个物理子步，最后统一完成奖励、终止、重置和观测更新。
+    # 训练时，PPO 采样循环会反复调用这个函数收集轨迹；
+    # 初始化时，BaseTask.reset() 也会用全零动作调用它一次，用来刷新初始观测。
+    #
+    # 输入：
+    # actions：策略网络为所有并行环境输出的动作张量；
+    #          每一行代表一个并行机器人当前时刻的控制指令，
+    #          后续会被裁剪到允许范围内，并转换成当前步真正施加的执行器力矩。
+    #
+    # 输出：
+    # 这个函数返回一个 6 元组，供训练器继续向前滚动环境：
+    # self.obs_buf：当前策略真正看到的普通观测，也就是 actor 网络的主要输入。
+    # self.privileged_obs_buf：给 critic 网络使用的特权观测；如果当前任务没有启用特权观测，这里可能是 None。
+    # self.rew_buf：所有并行环境在这一步得到的奖励。
+    # self.reset_buf：所有并行环境在这一步结束后是否需要重置的标记。
+    # self.extras：额外统计信息，例如 episode 日志和超时标记。
+    # self.obs_history：拼接后的历史观测序列，供带历史输入的策略使用。
     def step(self, actions):
         """Apply actions, simulate, call self.post_physics_step()
 
         Args:
             actions (torch.Tensor): Tensor of shape (num_envs, num_actions_per_env)
         """
+        # 先把策略输出的动作限制在配置允许的范围内，并放到当前环境张量所在的设备上。
         clip_actions = self.cfg.normalization.clip_actions
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
+
+        # 在真正推进物理仿真之前，先处理可视化窗口和一些与本步开始相关的预处理逻辑。
         # step physics and render each frame
         self.render()
         self.pre_physics_step()
+
+        # 一个环境步对应多个底层仿真子步：同一个策略动作会持续 decimation 个底层仿真步，以较高频率推进物理世界。
+        # 每个子步都真正调用一次 self.gym.simulate(self.sim)
+        # 动作延迟本质上也是域随机化的一部分
         for _ in range(self.cfg.control.decimation):
+            # 记录每个并行环境已经运行了多少个底层物理子步，
+            # 后面一些按时间触发的逻辑会用这个计数器做判断。
             self.envs_steps_buf += 1
+
+            # 维护动作历史队列 action_fifo：
+            # 这个张量的三个维度分别表示“并行环境编号、历史动作在时间队列中的位置、动作向量的各个分量”。
+            # 其中第 1 维的长度由最大动作延迟决定，保存最近若干个物理子步的动作，
+            # 目的是为了模拟控制指令不能立刻生效的执行器延迟，而不是单纯为了记录日志。
+            #
+            # self.actions 的形状原本是 [num_envs, num_actions]，
+            # unsqueeze(1) 会在中间插入一个长度为 1 的新维度，把它变成 [num_envs, 1, num_actions]，
+            # 这样当前动作就能被看成“一帧新的历史动作”，与 action_fifo 在时间维上对齐。
+            #
+            # self.action_fifo[:, :-1, :] 表示保留旧队列中除最后一帧之外的所有历史动作；
+            # torch.cat(..., dim=1) 表示沿着“历史时间维”拼接，
+            # 因此拼接后的结果就是：
+            # 最新动作放在最前面，原来的历史动作整体后移一格，最老的一帧被丢弃。
+            # 后面再通过 action_delay_idx 从这个队列中选出“当前真正生效的那一帧动作”。
             self.action_fifo = torch.cat(
                 (self.actions.unsqueeze(1), self.action_fifo[:, :-1, :]), dim=1
             )
+
+            # 根据延迟后的动作计算本次真正施加到关节上的力矩。
+            # 这里的 action_delay_idx 不是手写固定值，而是在初始化/重置阶段按 delay_ms_range 随机生成的，
+            # 先把“毫秒级延迟范围”除以 sim_params.dt，也就是底层物理仿真单步时长，
+            # 再四舍五入成整数索引，因此它表示“延迟了多少个底层物理步”，而不是延迟多少个环境步。
+            #
+            # 下面这段高级索引的含义是：
+            # torch.arange(self.num_envs) 会生成 [0, 1, 2, ..., num_envs-1]，
+            # 也就是“每个并行环境自己的编号”。
+            # action_delay_idx 则给出“每个环境应该取历史队列中的第几帧动作”。
+            # ':' 表示把这一帧动作的全部动作分量都取出来。
+            #
+            # 例如当 num_envs=3、action_delay_idx=[0, 2, 1] 时，
+            # torch.arange(self.num_envs) 就相当于 [0, 1, 2]，
+            # 整体索引就等价于：
+            # action_fifo[[0, 1, 2], [0, 2, 1], :]
+            # 它实际取出的分别是：
+            # 第 0 个环境的第 0 帧历史动作、
+            # 第 1 个环境的第 2 帧历史动作、
+            # 第 2 个环境的第 1 帧历史动作。
+            # 因此最终得到的是一个形状为 [num_envs, num_actions] 的张量，
+            # 表示“每个并行环境当前真正生效的那一帧延迟动作”，再交给 _compute_torques(...) 转成关节力矩。
             self.torques = self._compute_torques(
                 self.action_fifo[torch.arange(self.num_envs), self.action_delay_idx, :]
             ).view(self.torques.shape)
+
+            # 把算出的关节力矩写入 Isaac Gym，让下一次物理积分按这些执行器输入推进。
             self.gym.set_dof_actuation_force_tensor(
                 self.sim, gymtorch.unwrap_tensor(self.torques)
             )
+
+            # 如果启用了外力扰动随机化，就按配置周期给机器人施加随机推力。
             if self.cfg.domain_rand.push_robots:
                 self._push_robots()
+
+            # 真正推进一次底层物理仿真。
             self.gym.simulate(self.sim)
+
+            # 当仿真主要跑在 CPU 上时，需要显式等待并取回这一步的结果。
             if self.device == "cpu":
                 self.gym.fetch_results(self.sim, True)
+
+            # 刷新关节状态张量，并基于最新位置估计速度，供后续奖励和观测计算使用。
             self.gym.refresh_dof_state_tensor(self.sim)
             self.compute_dof_vel()
+
+        # 物理子步全部完成后，统一刷新根状态、检查终止、计算奖励、重置需要结束的环境，并生成新观测。
         self.post_physics_step()
 
+        # 在返回给训练器之前，对普通观测和特权观测做数值裁剪，
+        # 避免异常大数值破坏策略网络和价值网络的稳定性。
         # return clipped obs, clipped states (None), rewards, dones and infos
         clip_obs = self.cfg.normalization.clip_observations
         self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
@@ -143,18 +223,40 @@ class LeggedRobot(BaseTask):
 
         self.last_dof_pos[:] = self.dof_pos[:]
 
+    # 作用：
+    # 这个函数负责在一整个环境步的所有物理子步结束后，统一完成“仿真后处理”。
+    # 它会先从仿真器刷新机器人根部状态、接触力和刚体状态，
+    # 再整理奖励与观测计算需要的派生物理量，随后执行命令更新、终止判定、奖励累计、环境重置和新观测生成。
+    # 从整体流程上看，它承接 step() 中的物理推进阶段，是“物理结果 -> 强化学习信号”的转换枢纽。
+    #
+    # 输入：
+    # 这个函数没有显式参数；它直接读取当前环境对象里已经由前面物理子步更新好的状态张量，
+    # 例如根部位姿、关节状态、接触力、上一时刻缓存值以及当前动作。
+    #
+    # 输出：
+    # 这个函数没有显式返回值；它通过修改当前环境对象的内部状态产生效果。
+    # 具体会更新奖励缓冲区、重置标记、普通观测、特权观测、历史观测以及若干“上一时刻”缓存，
+    # 这些结果会在 step() 返回时被训练器直接读取。
     def post_physics_step(self):
         """check terminations, compute observations and rewards
         calls self._post_physics_step_callback() for common computations
         calls self._draw_debug_vis() if needed
         """
+        # 先从 Isaac Gym 刷新本步结束后的关键状态张量：
+        # 包括机器人根部状态、全身接触力和各刚体状态，
+        # 后面的终止判定、奖励计算和观测构造都会依赖这些最新结果。
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
 
+        # 维护回合级和全局级的步数计数器。
+        # episode_length_buf 表示每个并行环境当前回合已经运行了多少步；
+        # common_step_counter 表示整个环境对象从启动以来累计执行了多少个环境步。
         self.episode_length_buf += 1
         self.common_step_counter += 1
 
+        # 根据刚刚刷新的根部状态和关节状态，整理后续频繁使用的派生物理量：
+        # 例如机体姿态四元数、机体坐标系下的线速度与角速度、重力在机体系下的投影，以及关节加速度。
         # prepare quantities
         self.base_quat[:] = self.root_states[:, 3:7]
         self.base_lin_vel = (self.base_position - self.last_base_position) / self.dt
@@ -167,6 +269,10 @@ class LeggedRobot(BaseTask):
         )
         self.dof_acc = (self.last_dof_vel - self.dof_vel) / self.dt
 
+        # 用两条腿的关节角计算虚拟腿几何量：
+        # theta1 和 theta2 表示两级连杆的关节角组合，
+        # L0 表示虚拟腿长度，theta0 表示虚拟腿相对机体的摆角。
+        # 这些量会参与奖励设计，也会被 VMC 版本作为更核心的状态表达。
         theta1 = torch.cat(
             (self.dof_pos[:, 0].unsqueeze(1), -self.dof_pos[:, 3].unsqueeze(1)), dim=1
         )
@@ -188,8 +294,15 @@ class LeggedRobot(BaseTask):
         self.L0 = torch.sqrt(end_x**2 + end_y**2)
         self.theta0 = torch.arctan2(end_y, end_x) - self.pi / 2
 
+        # 执行“物理步之后但在奖励/观测之前”的通用回调：
+        # 这里会处理命令重采样、朝向命令换算、地形高度测量等共享逻辑。
         self._post_physics_step_callback()
 
+        # 依次完成强化学习环境真正关心的几件事：
+        # 1. 检查哪些并行环境需要结束；
+        # 2. 计算本步奖励；
+        # 3. 对需要结束的环境执行局部重置；
+        # 4. 生成下一步策略要读取的新观测。
         # compute observations, rewards, resets, ...
         self.check_termination()
         self.compute_reward()
@@ -197,12 +310,15 @@ class LeggedRobot(BaseTask):
         self.reset_idx(env_ids)
         self.compute_observations()  # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
+        # 把本步结果保存成“上一时刻缓存”，供下一步计算速度、加速度、动作变化率和历史观测时使用。
         self.last_actions[:, :, 1] = self.last_actions[:, :, 0]
         self.last_actions[:, :, 0] = self.actions[:]
         self.last_base_position[:] = self.base_position[:]
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_root_vel[:] = self.root_states[:, 7:13]
 
+        # 如果启用了 viewer 可视化窗口、同步渲染以及调试显示，
+        # 就在这里把辅助调试图形画出来，例如地形采样点等可视化信息。
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self._draw_debug_vis()
 
@@ -910,8 +1026,28 @@ class LeggedRobot(BaseTask):
         return noise_vec
 
     # ----------------------------------------
+    # 作用：
+    # 这个函数负责把 Isaac Gym 底层仿真返回的状态张量，整理成当前环境对象后续训练会持续复用的成员变量。
+    # 从整个项目角度看，它是“仿真层”和“强化学习环境逻辑层”之间最关键的一次对接：
+    # 上面一层的 step()、reset_idx()、compute_observations()、compute_reward() 以及 PPO 采样流程，
+    # 后面几乎都依赖这里准备好的状态视图、缓存张量、控制参数和随机化结果。
+    #
+    # 输入：
+    # 这个函数没有显式参数；它读取的输入主要来自当前环境对象已经准备好的上下文，
+    # 包括 self.sim 表示的仿真实例、self.cfg 表示的环境与控制配置、
+    # self.num_envs 和 self.num_dof 表示的并行环境规模与关节规模，
+    # 以及 create_sim() 阶段已经创建好的机器人、地形和刚体信息。
+    #
+    # 输出：
+    # 这个函数没有显式返回值；它的结果是把当前对象初始化成“可以正式进入训练循环”的状态。
+    # 执行完成后，环境对象会持有：
+    # 1. 与 Isaac Gym 状态张量共享内存的视图，供每一步读取机器人姿态、关节和接触信息；
+    # 2. 观测、控制、命令、历史动作和调试统计所需的缓存；
+    # 3. 由配置和 domain randomization 决定的 PD 参数、默认关节位置和动作延迟设置。
     def _init_buffers(self):
         """Initialize torch tensors which will contain simulation states and processed quantities"""
+        # 从 Isaac Gym 取出根状态、关节状态和接触力这三类使用 Isaac Gym 内置类型表示的数据，
+        # 并立即刷新一次，确保后面包装出的张量视图看到的是当前最新仿真状态。
         # get gym GPU state tensors
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
@@ -920,6 +1056,9 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
+        # 把 Isaac Gym 内置类型表示的数据包装成 PyTorch 视图，并切出后续高频使用的字段：
+        # 例如机身根状态、关节位置与速度、机身姿态四元数、以及每个刚体的接触力。
+        # 这一步决定了后续环境逻辑可以直接用 torch 方式处理 Isaac Gym 的实时状态。
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
@@ -927,11 +1066,13 @@ class LeggedRobot(BaseTask):
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
         self.dof_acc = torch.zeros_like(self.dof_vel)
         self.base_quat = self.root_states[:, 3:7]
-
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(
             self.num_envs, -1, 3
         )  # shape: num_envs, num_bodies, xyz axis
 
+        # 初始化环境级共享缓存：
+        # 这里包括噪声缩放、重力方向、机体前向方向，以及策略输出力矩、PD 增益、
+        # 当前动作和历史动作等高频中间量。它们共同支撑 step() 里的控制计算与观测构造。
         # initialize some data used later on
         self.common_step_counter = 0
         self.extras = {}
@@ -990,6 +1131,10 @@ class LeggedRobot(BaseTask):
         self.last_dof_pos = torch.zeros_like(self.dof_pos)
         self.last_dof_vel = torch.zeros_like(self.dof_vel)
         self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
+
+        # 初始化命令相关状态。
+        # 这些张量描述策略给出的机器人跟踪目标，例如前进速度、偏航角速度和目标高度；
+        # curriculum 与命令重采样逻辑会直接读写这里的数据。
         self.commands = torch.zeros(
             self.num_envs,
             self.cfg.commands.num_commands + 1,
@@ -1054,6 +1199,10 @@ class LeggedRobot(BaseTask):
         self.base_ang_vel = quat_rotate_inverse(
             self.base_quat, self.root_states[:, 10:13]
         )
+
+        # 为外力扰动、重力投影和动作延迟机制准备缓存。
+        # 其中动作延迟队列会在 step() 中维护，用来模拟控制命令并不是立即到达执行器的现实情况；
+        # 这是整个项目 domain randomization 的一部分。
         self.rigid_body_external_forces = torch.zeros(
             (self.num_envs, self.num_bodies, 3), device=self.device, requires_grad=False
         )
@@ -1076,6 +1225,10 @@ class LeggedRobot(BaseTask):
             device=self.device,
             requires_grad=False,
         )
+
+        # 如果任务启用了地形高度测量，就预先生成机体周围的采样点。
+        # 后续 compute_observations() 会用这些采样点构造高度相关观测，
+        # 让策略感知粗糙地形的局部形状。
         if self.cfg.terrain.measure_heights:
             self.height_points = self._init_height_points()
         self.measured_heights = 0
@@ -1083,6 +1236,9 @@ class LeggedRobot(BaseTask):
             self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1
         )
 
+        # 预留腿部几何中间量。
+        # 这些量在普通 LeggedRobot 中用于根据关节角恢复腿长和腿摆角，
+        # 在 VMC 子类里则会进一步扩展成更完整的虚拟腿状态。
         self.L0 = torch.zeros(
             self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False
         )
@@ -1090,6 +1246,9 @@ class LeggedRobot(BaseTask):
             self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False
         )
 
+        # 根据配置文件为每个关节建立默认位置和 PD 增益。
+        # 将配置中的机器人定义翻译成控制器可直接使用的数值张量，
+        # 后面的 _compute_torques() 会直接读取这些参数生成控制力矩。
         # joint positions offsets and PD gains
         self.raw_default_dof_pos = torch.zeros(
             self.num_dof,
@@ -1104,17 +1263,32 @@ class LeggedRobot(BaseTask):
             device=self.device,
             requires_grad=False,
         )
+        # 这里按“当前仿真内部的自由度索引顺序”逐个处理关节。
+        # 配置文件中的 default_joint_angles、stiffness 和 damping 是“按关节名字组织”的，
+        # 但控制器在运行时需要的是“按索引排好、可直接参与张量运算”的参数。
+        # 所以下面这段循环本质上是在做一次从“名字配置”到“批量数值张量”的映射。
         for i in range(self.num_dofs):
             name = self.dof_names[i]
             angle = self.cfg.init_state.default_joint_angles[name]
+
+            # raw_default_dof_pos 保存“原始配置里定义的默认关节位置”，只保留一份机器人本体参数；
+            # default_dof_pos 形状为 (num_envs, num_dof) ，在这里我们把同一个默认值复制到所有并行环境上，
+            # 方便后续控制器一次性对全部环境进行张量计算。
             self.raw_default_dof_pos[i] = angle
             self.default_dof_pos[:, i] = angle
             found = False
+
+            # 这里不是直接用关节索引查增益，而是用当前关节名字去匹配配置里的 stiffness 和 damping。
+            # 匹配成功后，就把这个关节对应的 PD 参数写入 p_gains 和 d_gains，
+            # 让后面的 _compute_torques() 可以直接按“环境批次 x 关节索引”读取控制增益。
             for dof_name in self.cfg.control.stiffness.keys():
                 if dof_name in name:
                     self.p_gains[:, i] = self.cfg.control.stiffness[dof_name]
                     self.d_gains[:, i] = self.cfg.control.damping[dof_name]
                     found = True
+
+            # 如果配置里没有为当前关节找到 PD 参数，就显式置零。
+            # 这样做的含义不是“这个关节不存在”，而是“这个关节在当前位置控制或速度控制模式下不施加对应的 PD 控制增益”。
             if not found:
                 self.p_gains[:, i] = 0.0
                 self.d_gains[:, i] = 0.0
@@ -1122,6 +1296,10 @@ class LeggedRobot(BaseTask):
                     print(
                         f"PD gain of joint {name} were not defined, setting them to zero"
                     )
+
+        # 最后应用 domain randomization。
+        # 这里会随机扰动控制器增益、执行器力矩缩放、默认关节零位和动作延迟，
+        # 目的是让训练出来的策略对真实硬件中的参数偏差和控制链路延迟更鲁棒。
         if self.cfg.domain_rand.randomize_Kp:
             (
                 p_gains_scale_min,
@@ -1173,10 +1351,27 @@ class LeggedRobot(BaseTask):
             ).squeeze(-1)
             self.action_delay_idx = action_delay_idx.long()
 
+    # 作用：
+    # 这个函数负责在环境初始化阶段，把配置文件里声明的奖励项权重表整理成运行时可直接调用的奖励函数列表。
+    # 后面的 compute_reward() 不再每一步临时查配置和拼函数名，而是直接遍历这里准备好的函数列表。
+    #
+    # 输入：
+    # 这个函数没有显式参数；它主要读取 self.reward_scales 这个奖励权重字典。
+    # 这个字典通常来自配置文件中的 rewards.scales，并且键名对应各个奖励项的名字，
+    # 例如 tracking_lin_vel、orientation、torques 等。
+    #
+    # 输出：
+    # 这个函数没有显式返回值；它会修改和创建三类运行时状态：
+    # 1. self.reward_scales：移除权重为零的奖励项，并把保留下来的权重按仿真步长 self.dt 做时间尺度缩放；
+    # 2. self.reward_functions 和 self.reward_names：建立“奖励名字 -> 具体成员函数”的调用顺序表，供 compute_reward() 逐项累加；
+    # 3. self.episode_sums：为每个并行环境记录各奖励项在一个 episode 内的累计值，供 reset_idx() 统计日志。
     def _prepare_reward_function(self):
         """Prepares a list of reward functions, whcih will be called to compute the total reward.
         Looks for self._reward_<REWARD_NAME>, where <REWARD_NAME> are names of all non zero reward scales in the cfg.
         """
+        # 先清理奖励权重表：
+        # 权重为 0 的奖励项说明当前任务不启用，可以直接移除，避免后面每一步做无意义计算；
+        # 保留下来的非零奖励项会乘以仿真步长 self.dt，将单位时间的奖励换算成当前控制步持续时长下的奖励
         # remove zero scales + multiply non-zero ones by dt
         for key in list(self.reward_scales.keys()):
             scale = self.reward_scales[key]
@@ -1184,16 +1379,30 @@ class LeggedRobot(BaseTask):
                 self.reward_scales.pop(key)
             else:
                 self.reward_scales[key] *= self.dt
+
+        # 根据奖励名字动态收集对应的成员函数。
+        # 例如配置里有 tracking_lin_vel，就去查找当前对象上的 _reward_tracking_lin_vel 方法。
+        # 这样 compute_reward() 后续只需要按固定顺序遍历 reward_functions 即可。
         # prepare list of functions
         self.reward_functions = []
         self.reward_names = []
         for name, scale in self.reward_scales.items():
+            # termination 奖励项单独处理：
+            # 它不进入普通奖励循环，而是在 compute_reward() 的末尾单独计算并叠加。
             if name == "termination":
                 continue
             self.reward_names.append(name)
             name = "_reward_" + name
+            # getattr(self, name) 的意思是：用字符串形式的属性名 name，
+            # 去当前对象 self 上动态查找同名属性。
+            # 这里查找到是对应的成员方法对象，
+            # 例如当 name 是 "_reward_torques" 时，取到的是 self._reward_torques 这个方法。
+            # append(...) 加入列表的也是这个方法对象，因此后面可以通过 self.reward_functions[i]() 直接调用。
             self.reward_functions.append(getattr(self, name))
 
+        # 为每个奖励项准备 episode 级累计缓存。
+        # 这里的结构是“奖励项名字 -> 每个并行环境各自的累计奖励”，
+        # 后面 compute_reward() 会持续往里累加，reset_idx() 会在回合结束时读取并清零，用于日志统计。
         # reward episode sums
         self.episode_sums = {
             name: torch.zeros(
@@ -1505,16 +1714,52 @@ class LeggedRobot(BaseTask):
             self.env_origins[:, 2] = 0.0
             self.flat_idx = torch.arange(self.num_envs, device=self.device)
 
+    # 作用：
+    # 这个函数负责把环境配置对象里的原始超参数，转换成当前环境实例在后续运行时直接使用的内部字段。
+    # 它主要完成三类准备工作：统一时间尺度、提取观测与奖励相关配置、以及把若干“以秒为单位”的配置换算成“以控制步为单位”的值。
+    # 这些结果会被 step()、奖励计算、命令采样、课程学习和终止判定等流程反复使用。
+    #
+    # 输入：
+    # cfg：环境配置对象，按设计这里代表当前任务的配置来源；
+    #      虽然函数体里实际主要读取 self.cfg，也就是当前环境实例保存的完整配置，
+    #      但这个参数表达了这个函数的职责是“解析当前任务配置”。
+    #
+    # 输出：
+    # 这个函数没有显式返回值；它通过修改当前环境对象的内部状态产生效果。
+    # 具体会写入 dt，也就是一次策略控制对应的真实时间间隔；
+    # 写入 obs_scales，也就是各类观测量在送入策略前使用的缩放系数；
+    # 写入 reward_scales，也就是各奖励项的权重表；
+    # 写入 command_ranges，也就是速度、高度等指令的采样范围；
+    # 还会写入 max_episode_length 和 push_interval 这类按“控制步数”表示的运行参数。
     def _parse_cfg(self, cfg):
+        # 这里的 self.dt 表示“强化学习环境视角下一步控制”对应的真实时间长度，
+        # 不是底层物理引擎单次积分的最小时间步。
+        # self.sim_params.dt 表示物理仿真一步前进多少秒；
+        # self.cfg.control.decimation 表示同一个策略动作会连续作用多少个物理仿真步。
+        # 因此二者相乘后，得到一次 env.step(...) 实际覆盖的时间：
+        # 例如物理步长是 0.005 秒、同一动作持续 2 个物理步，
+        # 那么环境控制步的时间 self.dt 就是 0.01 秒。
         self.dt = self.cfg.control.decimation * self.sim_params.dt
+
+        # 取出观测缩放系数、奖励权重和指令范围配置，供后续观测拼接、奖励计算和命令采样直接使用。
+        # reward_scales 和 command_ranges 额外转成普通字典，是为了后面按名字动态访问和修改更方便。
         self.obs_scales = self.cfg.normalization.obs_scales
         self.reward_scales = class_to_dict(self.cfg.rewards.scales)
         self.command_ranges = class_to_dict(self.cfg.commands.ranges)
+
+        # 课程学习里的地形难度推进只在高度场或三角网格地形上有意义。
+        # 如果当前不是这两类复杂地形，就直接关闭 terrain.curriculum，也就是地形课程学习开关。
         if self.cfg.terrain.mesh_type not in ["heightfield", "trimesh"]:
             self.cfg.terrain.curriculum = False
+
+        # 先保留“以秒为单位”的单回合最大时长，
+        # 再结合上面算出的环境步长 dt，换算出“一个 episode 最多能跑多少个控制步”。
+        # 后面的超时终止、日志统计和训练器初始化都会依赖这个步数版本的上限。
         self.max_episode_length_s = self.cfg.env.episode_length_s
         self.max_episode_length = np.ceil(self.max_episode_length_s / self.dt)
 
+        # 把“每隔多少秒推一次机器人”的随机扰动配置，
+        # 换算成“每隔多少个环境控制步执行一次”的内部表示，方便 step 循环直接取模判断。
         self.cfg.domain_rand.push_interval = np.ceil(
             self.cfg.domain_rand.push_interval_s / self.dt
         )

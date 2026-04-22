@@ -93,12 +93,16 @@ class ActorCriticSequence(nn.Module):
         self.encoder = nn.Sequential(*encoder_layers)
 
         # Policy
+        # 构建策略网络：输入由当前观测和历史观测编码得到的 latent 拼接而成，输出维度对应机器人动作空间。
         actor_layers = []
+        # 第一层把“当前可观测状态 + 历史信息估计量”映射到配置指定的第一个隐藏层宽度。
         actor_layers.append(nn.Linear(num_obs + self.latent_dim, actor_hidden_dims[0]))
         if self.orthogonal_init:
             torch.nn.init.orthogonal_(actor_layers[-1].weight, np.sqrt(2))
         actor_layers.append(activation)
+        # 按 actor_hidden_dims 配置继续堆叠隐藏层；最后一层不再接激活函数，直接输出动作分布的均值。
         for l in range(len(actor_hidden_dims)):
+            # 最后一层不再接激活函数
             if l == len(actor_hidden_dims) - 1:
                 actor_layers.append(nn.Linear(actor_hidden_dims[l], num_actions))
                 if self.orthogonal_init:
@@ -113,6 +117,7 @@ class ActorCriticSequence(nn.Module):
                     torch.nn.init.constant_(actor_layers[-1].bias, 0.0)
                 actor_layers.append(activation)
                 # actor_layers.append(torch.nn.LayerNorm(actor_hidden_dims[l + 1]))
+        # 将上面逐步收集的线性层和激活函数串成一个可直接调用的策略网络。
         self.actor = nn.Sequential(*actor_layers)
 
         # Value function
@@ -141,6 +146,7 @@ class ActorCriticSequence(nn.Module):
         print(f"Critic MLP: {self.critic}")
 
         # Action noise
+        # 为每一个动作维度设置一个可学习的标准差参数，初始值为 init_noise_std。
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
         self.distribution = None
         # disable args validation for speedup
@@ -177,10 +183,13 @@ class ActorCriticSequence(nn.Module):
     @property
     def entropy(self):
         return self.distribution.entropy().sum(dim=-1)
-
+        
+    # 计算当前状态下的动作分布，从而更新当前对象里缓存的动作概率分布 self.distribution。
     def update_distribution(self, observations, observation_history):
         self.latent = self.encoder(observation_history)
+        # 沿最后一维拼接当前观测和历史观测编码得到的 latent，输入到策略网络得到动作分布的均值。
         mean = self.actor(torch.cat((observations, self.latent.detach()), dim=-1))
+        # mean 中还带有 batch 维度，所以使用 mean*0. + self.std 自动广播到每个动作维度上
         self.distribution = Normal(mean, mean*0. + self.std)
 
     def act(self, observations, observation_history, **kwargs):

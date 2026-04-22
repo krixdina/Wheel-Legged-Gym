@@ -113,6 +113,7 @@ class PPO:
         if self.actor_critic.is_sequence:
             self.transition.actions = self.actor_critic.act(obs, obs_history).detach()
             latent = self.actor_critic.get_latent()
+            # critic 输入：特权观测 + latent
             critic_obs = torch.cat((critic_obs, latent), dim=-1)
         else:
             self.transition.actions = self.actor_critic.act(obs).detach()
@@ -132,10 +133,20 @@ class PPO:
         self.transition.critic_observations = critic_obs.clone()
         return self.transition.actions
 
+    # 作用：在环境完成一步交互后，把这一步动作得到的奖励、结束标记和下一时刻观测补全到临时转移对象中，
+    #      处理因时间上限截断带来的 bootstrap 奖励修正，然后把完整转移写入 rollout 缓冲区，供后续计算 returns 和 PPO 更新使用。
+    # 输入：rewards 表示环境在执行当前动作后返回的即时奖励；dones 表示并行环境中哪些轨迹在这一步结束；
+    #      infos 表示环境附带返回的辅助信息字典，其中可能包含是否因时间上限被截断的标记；
+    #      next_obs 表示执行当前动作后得到的下一时刻普通观测，会与动作前缓存的观测一起组成一条完整转移。
+    # 输出：函数没有显式返回值；它会更新当前临时转移对象中的奖励、结束标记和下一时刻观测，
+    #      将这条转移写入 rollout 缓冲区，并按结束标记重置策略内部状态，为下一步采样做准备。
     def process_env_step(self, rewards, dones, infos, next_obs=None):
+        # 将环境返回的即时奖励和结束标记补到当前转移中；这一转移的动作、旧 value 和旧策略概率已在 act() 阶段缓存。
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
         # Bootstrapping on time outs
+        # infos 中的 time_outs 表示回合是因为时间上限被截断，而不是真正到达终止状态；
+        # 这时把当前 critic 的价值估计折算进奖励，避免把“被截断”误当成“未来回报为零”的自然终止。
         if "time_outs" in infos:
             self.transition.rewards += self.gamma * torch.squeeze(
                 self.transition.values
@@ -144,6 +155,8 @@ class PPO:
             )
 
         # Record the transition
+        # 把动作后的下一时刻观测补齐后，将当前这条完整转移写入 rollout 缓冲区；
+        # 写入完成后清空临时缓存，并根据 dones 表示的结束环境重置策略内部状态，例如循环网络隐藏状态。
         self.transition.next_observations = next_obs
         self.storage.add_transitions(self.transition)
         self.transition.clear()
@@ -198,8 +211,10 @@ class PPO:
             critic_obs_batch,
             actions_batch,
             target_values_batch,
+            # return 和 advantage 在轨迹被打乱之前已经按照时间顺序计算好了
             advantages_batch,
             returns_batch,
+            # 来源于 rollout 的训练数据，代表当前 mini-batch 中每条转移在采样时旧策略下的动作概率分布
             old_actions_log_prob_batch,
             old_mu_batch,
             old_sigma_batch,
@@ -225,9 +240,12 @@ class PPO:
             )
             mu_batch = self.actor_critic.action_mean
             sigma_batch = self.actor_critic.action_std
+
+            # 当前 actor 在当前 batch 观测下产生的动作高斯分布的熵
             entropy_batch = self.actor_critic.entropy
 
             # KL
+            # 估计当前策略动作分布和采样数据时旧策略动作分布的差异；这里只用于调节学习率
             with torch.inference_mode():
                 kl = torch.sum(
                     torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
@@ -241,36 +259,50 @@ class PPO:
                 )
                 kl_mean = torch.mean(kl)
 
+                # 如果策略分布变化过大，就降低学习率让更新更保守；如果变化过小，就提高学习率加快学习。
                 if self.desired_kl is not None and self.schedule == "adaptive":
                     if kl_mean > self.desired_kl * 2.0:
                         self.learning_rate = max(1e-5, self.learning_rate / 1.5)
                     elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
                         self.learning_rate = min(1e-2, self.learning_rate * 1.5)
 
+                    # 将调整后的学习率写回优化器的所有参数组，使后续梯度更新使用新的步长。
                     for param_group in self.optimizer.param_groups:
                         param_group["lr"] = self.learning_rate
 
             # Surrogate loss
+            # 计算重要性采样权重，用它衡量当前策略对同一批旧动作的偏好变化。
             ratio = torch.exp(
                 actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch)
             )
+            # PPO-clip loss function
+            # 设置为负数是因为默认的优化器是最小化损失，而我们希望最大化优势函数。
             surrogate = -torch.squeeze(advantages_batch) * ratio
             surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(
                 ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
             )
+            # mean() 在代码层面先平均 mini-batch 内每个样本的策略损失；后续 loss.backward() 对这个平均损失求导，等价于得到平均梯度。
+            # 而使用 mini-batch 的目的就是得到方差较小的平均梯度
             surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
             # Value function loss
+            # 计算 critic 的价值函数损失；开启裁剪时，会限制新价值估计相对旧价值估计的变化幅度。
             if self.use_clipped_value_loss:
+                # 新 value 相对旧 value 的变化量，最多限制在 [-clip_param, +clip_param]
                 value_clipped = target_values_batch + (
                     value_batch - target_values_batch
                 ).clamp(-self.clip_param, self.clip_param)
+                # 分别计算未裁剪价值估计和裁剪后价值估计到回报目标的平方误差。
                 value_losses = (value_batch - returns_batch).pow(2)
                 value_losses_clipped = (value_clipped - returns_batch).pow(2)
+
+                # 选择更大的误差作为保守目标，避免 critic 通过过大的单步变化直接获得更小的损失。
                 value_loss = torch.max(value_losses, value_losses_clipped).mean()
             else:
+                # 不使用裁剪时，直接用当前价值估计和回报目标之间的均方误差训练 critic。
                 value_loss = (returns_batch - value_batch).pow(2).mean()
-
+            
+            
             loss = (
                 surrogate_loss
                 + self.value_loss_coef * value_loss
