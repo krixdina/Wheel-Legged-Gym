@@ -190,7 +190,7 @@ class LeggedRobot(BaseTask):
             self.gym.refresh_dof_state_tensor(self.sim)
             self.compute_dof_vel()
 
-        # 物理子步全部完成后，统一刷新机器人参考系状态(root_state)、检查终止、计算奖励、重置需要结束的环境，并生成新观测。
+        # 物理子步全部完成后，统一刷新根状态、检查终止、计算奖励、重置需要结束的环境，并生成新观测。
         self.post_physics_step()
 
         # 在返回给训练器之前，对普通观测和特权观测做数值裁剪，
@@ -224,12 +224,10 @@ class LeggedRobot(BaseTask):
         self.last_dof_pos[:] = self.dof_pos[:]
 
     # 作用：
-    # 这个函数负责在action被施加并持续指定的仿真物理子步后，完成“仿真后处理”。
-    # 它会先从仿真器刷新
-    # - 机器人参考系状态(root_state)、
-    # - 每个刚体 link 的净接触力(净接触力：把某个刚体在上一仿真步里由于所有接触产生的力合并后，得到一个总的 3D 力向量)
-    # - 整台机器人所有刚体 link 的状态，
+    # 这个函数负责在一整个环境步的所有物理子步结束后，统一完成“仿真后处理”。
+    # 它会先从仿真器刷新机器人根部状态、接触力和刚体状态，
     # 再整理奖励与观测计算需要的派生物理量，随后执行命令更新、终止判定、奖励累计、环境重置和新观测生成。
+    # 从整体流程上看，它承接 step() 中的物理推进阶段，是“物理结果 -> 强化学习信号”的转换枢纽。
     #
     # 输入：
     # 这个函数没有显式参数；它直接读取当前环境对象里已经由前面物理子步更新好的状态张量，
@@ -245,7 +243,7 @@ class LeggedRobot(BaseTask):
         calls self._draw_debug_vis() if needed
         """
         # 先从 Isaac Gym 刷新本步结束后的关键状态张量：
-        # 包括机器人参考系状态(root_state)、所有刚体净接触力和整台机器人所有刚体 link 的状态，
+        # 包括机器人根部状态、全身接触力和各刚体状态，
         # 后面的终止判定、奖励计算和观测构造都会依赖这些最新结果。
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
@@ -257,7 +255,7 @@ class LeggedRobot(BaseTask):
         self.episode_length_buf += 1
         self.common_step_counter += 1
 
-        # 根据刚刚刷新的机器人参考系状态(root_state)和关节状态，整理后续频繁使用的派生物理量：
+        # 根据刚刚刷新的根部状态和关节状态，整理后续频繁使用的派生物理量：
         # 例如机体姿态四元数、机体坐标系下的线速度与角速度、重力在机体系下的投影，以及关节加速度。
         # prepare quantities
         self.base_quat[:] = self.root_states[:, 3:7]
@@ -1048,7 +1046,7 @@ class LeggedRobot(BaseTask):
     # 3. 由配置和 domain randomization 决定的 PD 参数、默认关节位置和动作延迟设置。
     def _init_buffers(self):
         """Initialize torch tensors which will contain simulation states and processed quantities"""
-        # 从 Isaac Gym 取出机器人参考系状态(root_state)、关节状态和接触力这三类使用 Isaac Gym 内置类型表示的数据，
+        # 从 Isaac Gym 取出根状态、关节状态和接触力这三类使用 Isaac Gym 内置类型表示的数据，
         # 并立即刷新一次，确保后面包装出的张量视图看到的是当前最新仿真状态。
         # get gym GPU state tensors
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
@@ -1059,7 +1057,7 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
         # 把 Isaac Gym 内置类型表示的数据包装成 PyTorch 视图，并切出后续高频使用的字段：
-        # 例如机器人参考系状态(root_state)、关节位置与速度、机身姿态四元数、以及每个刚体的接触力。
+        # 例如机身根状态、关节位置与速度、机身姿态四元数、以及每个刚体的接触力。
         # 这一步决定了后续环境逻辑可以直接用 torch 方式处理 Isaac Gym 的实时状态。
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)

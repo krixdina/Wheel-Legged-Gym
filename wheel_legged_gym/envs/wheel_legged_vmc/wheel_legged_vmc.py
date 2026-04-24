@@ -190,23 +190,7 @@ class LeggedRobotVMC(LeggedRobot):
         self.L0_dot = (L0_temp - self.L0) / dt
         self.theta0_dot = (theta0_temp - self.theta0) / dt
 
-    # 作用：
-    # 这个函数根据两级连杆的关节角，计算每条等效腿末端相对髋部参考点的极坐标状态，
-    # 也就是“当前腿长有多长”以及“整条腿相对机体竖直方向偏转了多少角度”。
-    # 在当前项目里，这一步是虚拟模型控制的几何基础；上层会先用它恢复等效腿长度和摆角，
-    # 再进一步估计对应的变化速度，用于后续的腿长控制和摆角控制。
-    #
-    # 输入：
-    # theta1：第一段连杆的关节角，表示从髋部出发的上游连杆当前转到了什么位置。
-    # theta2：第二段连杆相对第一段连杆的关节角，表示下游连杆相对上游连杆继续弯折的程度。
-    #
-    # 输出：
-    # L0：等效腿长度，表示从髋部参考点到腿部末端接触点的直线距离。
-    # theta0：等效腿摆角，表示这条“髋部到足端”的等效连线相对机体竖直方向的偏转角。
     def forward_kinematics(self, theta1, theta2):
-        # 先把两段刚性连杆在平面内展开，求出腿部末端相对髋部参考点的二维坐标。
-        # 其中 offset 表示髋部参考点到第一段连杆安装点的固定水平偏置，
-        # l1 和 l2 分别表示两段连杆的长度。
         end_x = (
             self.cfg.asset.offset
             + self.cfg.asset.l1 * torch.cos(theta1)
@@ -215,8 +199,6 @@ class LeggedRobotVMC(LeggedRobot):
         end_y = self.cfg.asset.l1 * torch.sin(theta1) + self.cfg.asset.l2 * torch.sin(
             theta1 + theta2
         )
-        # 再把二维直角坐标转换成极坐标：
-        # 直线距离对应等效腿长，方向角再减去 pi/2 后，转换成相对机体竖直方向的摆角。
         L0 = torch.sqrt(end_x**2 + end_y**2)
         theta0 = torch.arctan2(end_y, end_x) - self.pi / 2
         return L0, theta0
