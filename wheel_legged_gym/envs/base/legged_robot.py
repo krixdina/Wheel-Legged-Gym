@@ -1030,9 +1030,8 @@ class LeggedRobot(BaseTask):
     # ----------------------------------------
     # 作用：
     # 这个函数负责把 Isaac Gym 底层仿真返回的状态张量，整理成当前环境对象后续训练会持续复用的成员变量。
-    # 从整个项目角度看，它是“仿真层”和“强化学习环境逻辑层”之间最关键的一次对接：
     # 上面一层的 step()、reset_idx()、compute_observations()、compute_reward() 以及 PPO 采样流程，
-    # 后面几乎都依赖这里准备好的状态视图、缓存张量、控制参数和随机化结果。
+    # 都依赖这里准备好的状态视图、缓存张量、控制参数和随机化结果。
     #
     # 输入：
     # 这个函数没有显式参数；它读取的输入主要来自当前环境对象已经准备好的上下文，
@@ -1044,7 +1043,7 @@ class LeggedRobot(BaseTask):
     # 这个函数没有显式返回值；它的结果是把当前对象初始化成“可以正式进入训练循环”的状态。
     # 执行完成后，环境对象会持有：
     # 1. 与 Isaac Gym 状态张量共享内存的视图，供每一步读取机器人姿态、关节和接触信息；
-    # 2. 观测、控制、命令、历史动作和调试统计所需的缓存；
+    # 2. 观测、控制、命令、历史动作和调试统计所需的变量；
     # 3. 由配置和 domain randomization 决定的 PD 参数、默认关节位置和动作延迟设置。
     def _init_buffers(self):
         """Initialize torch tensors which will contain simulation states and processed quantities"""
@@ -1471,7 +1470,8 @@ class LeggedRobot(BaseTask):
             .view(self.terrain.tot_rows, self.terrain.tot_cols)
             .to(self.device)
         )
-
+    
+    # URDF 文件在该函数中被加载到仿真中
     def _create_envs(self):
         """Creates environments:
         1. loads the robot URDF/MJCF asset,

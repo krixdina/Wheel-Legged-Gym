@@ -84,6 +84,12 @@ class LeggedRobotVMC(LeggedRobot):
         self.render()
         self.pre_physics_step()
         for _ in range(self.cfg.control.decimation):
+            # 先根据当前仿真返回的关节位置和速度，计算虚拟腿的实际状态：
+            # self.L0 / self.theta0 是当前真实腿长和等效腿摆角，
+            # self.L0_dot / self.theta0_dot 是对应变化率。
+            # 它们是 VMC 控制器的状态量；策略 actions 中的腿长和摆角维度则是目标参考量。
+            # 后续 _compute_torques(...) 会把动作目标转换成 l0_ref / theta0_ref，
+            # 再用“目标 - 当前实际状态”的误差生成虚拟腿力和力矩。
             self.leg_post_physics_step()
             self.envs_steps_buf += 1
             self.action_fifo = torch.cat(
@@ -164,9 +170,18 @@ class LeggedRobotVMC(LeggedRobot):
             self._draw_debug_vis()
 
     def leg_post_physics_step(self):
+        # Isaac Gym 返回的 self.dof_pos 是 URDF revolute joint 的原始关节角：
+        # 正方向由 URDF 中每个 joint frame 的旋转轴 <axis> 按右手定则确定。
+        # 左右腿在 URDF 里是镜像安装的，右腿 joint frame 与左腿方向相反，
+        # 所以左右腿同一个几何姿态通常表现为左腿关节角为正、右腿关节角为负。
+        # 这里将右腿角度取负，是为了把左右腿统一到同一个平面二连杆几何坐标系中。
         self.theta1 = torch.cat(
             (self.dof_pos[:, 0].unsqueeze(1), -self.dof_pos[:, 3].unsqueeze(1)), dim=1
         )
+        # theta2 是二连杆模型中的第二段连杆相对水平方向(在本例中为x方向)的夹角。
+        # 而在 URDF 中，第二段连杆与水平方向在定义时就相差 90°，
+        # 因此我们需要将第二段连杆关节旋转角加上 pi/2 来转换成第二段连杆与水平方向的夹角。
+        # 因此先用负号统一右腿镜像方向，再统一加 pi/2 把 URDF 关节角转换成几何夹角。
         self.theta2 = torch.cat(
             (
                 (self.dof_pos[:, 1] + self.pi / 2).unsqueeze(1),
@@ -174,6 +189,9 @@ class LeggedRobotVMC(LeggedRobot):
             ),
             dim=1,
         )
+
+        # 速度项必须使用与 theta1/theta2 完全一致的符号约定；
+        # pi/2 是常量偏置，对速度求导后为 0，因此这里只需要对右腿速度取负。
         theta1_dot = torch.cat(
             (self.dof_vel[:, 0].unsqueeze(1), -self.dof_vel[:, 3].unsqueeze(1)), dim=1
         )
@@ -187,6 +205,7 @@ class LeggedRobotVMC(LeggedRobot):
         L0_temp, theta0_temp = self.forward_kinematics(
             self.theta1 + theta1_dot * dt, self.theta2 + theta2_dot * dt
         )
+
         self.L0_dot = (L0_temp - self.L0) / dt
         self.theta0_dot = (theta0_temp - self.theta0) / dt
 
@@ -221,6 +240,17 @@ class LeggedRobotVMC(LeggedRobot):
         theta0 = torch.arctan2(end_y, end_x) - self.pi / 2
         return L0, theta0
 
+    # 相对父类 LeggedRobot.reset_idx(...) 的变化：
+    # 这个函数的主体流程基本沿用父类实现，仍然负责课程难度更新、机器人状态重置、命令重采样、
+    # episode 缓冲区清零以及训练日志统计。VMC 子类没有在这里新增专门的关节或机身重置逻辑。
+    #
+    # 真正的行为差异来自当前类重写了 compute_proprioception_observations(...)：
+    # 父类初始化历史观测时使用的是原始关节位置误差和原始关节速度；
+    # 当前类初始化 self.obs_history 这个供历史观测编码器使用的缓存时，使用的是虚拟腿摆角 theta0、
+    # 虚拟腿摆角速度 theta0_dot、虚拟腿长 L0、虚拟腿长速度 L0_dot，以及左右轮关节状态。
+    #
+    # 注意：这个函数本身没有显式重新计算 theta0、theta0_dot、L0、L0_dot 这些虚拟腿状态；
+    # 它们通常由每个物理子步前的 leg_post_physics_step(...) 根据最新关节状态更新。
     def reset_idx(self, env_ids):
         """Reset some environments.
             Calls self._reset_dofs(env_ids), self._reset_root_states(env_ids), and self._resample_commands(env_ids)
@@ -300,6 +330,19 @@ class LeggedRobotVMC(LeggedRobot):
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
 
+    # 相对父类 LeggedRobot.compute_proprioception_observations(...) 的变化：
+    # 父类普通观测会直接包含全部关节的位置误差 (self.dof_pos - self.default_dof_pos)
+    # 和全部关节速度 self.dof_vel，也就是让策略网络直接看到 6 个自由度的原始关节状态。
+    #
+    # 当前 VMC 子类把腿部原始关节状态替换成虚拟腿状态：
+    # self.theta0 表示左右虚拟腿相对机体竖直方向的摆角；
+    # self.theta0_dot 表示左右虚拟腿摆角变化速度；
+    # self.L0 表示左右虚拟腿长度；
+    # self.L0_dot 表示左右虚拟腿长度变化速度。
+    # 这样 actor 学到的是“虚拟腿层”的控制输入，而不是直接基于腿部关节角做端到端控制。
+    #
+    # 轮子仍然保留原始关节状态：self.dof_pos[:, [2, 5]] 表示左右轮关节位置，
+    # self.dof_vel[:, [2, 5]] 表示左右轮关节速度，因为 VMC 只替换腿部几何控制，轮速仍直接参与底层控制。
     def compute_proprioception_observations(self):
         # note that observation noise need to modified accordingly !!!
         obs_buf = torch.cat(
@@ -322,6 +365,17 @@ class LeggedRobotVMC(LeggedRobot):
         )
         return obs_buf
 
+    # 相对父类 LeggedRobot.compute_observations(...) 的变化：
+    # 第一处变化是普通观测 self.obs_buf 的内容已经由当前类的 compute_proprioception_observations(...)
+    # 改成 VMC 观测结构，因此 actor 主要看到机体角速度、重力方向、运动命令、虚拟腿状态、轮关节状态和动作历史。
+    #
+    # 第二处变化是特权观测 self.privileged_obs_buf 额外保留了完整原始关节信息：
+    # (self.dof_pos - self.default_dof_pos) 表示全部关节相对默认姿态的位置偏差，
+    # self.dof_vel 表示全部关节速度。也就是说，actor 不直接看全部腿部原始关节状态，
+    # 但 critic 仍可以在训练时使用这些更完整的物理状态来估计价值函数。
+    #
+    # 第三处变化是历史观测 self.obs_history 每次都会滑动追加当前普通观测；
+    # 父类会根据 obs_history_dec 这个历史观测降采样参数决定是否更新，当前类没有使用这个降采样条件。
     def compute_observations(self):
         """Computes observations"""
         self.obs_buf = self.compute_proprioception_observations()
@@ -365,6 +419,19 @@ class LeggedRobotVMC(LeggedRobot):
             (self.obs_history[:, self.num_obs :], self.obs_buf), dim=-1
         )
 
+    # 作用：
+    # 这个函数把策略网络输出的动作转换成 Isaac Gym 仿真器要施加到 6 个真实关节上的力矩命令。
+    # 与父类直接用关节位置误差和关节速度误差做 PD 控制不同，当前 VMC 子类先把腿部动作解释为
+    # 虚拟腿摆角目标和虚拟腿长度目标，再通过虚拟模型控制把等效腿上的力和力矩映射到真实腿部关节。
+    #
+    # 输入：
+    # actions：策略网络在当前控制步输出的动作张量，每一行对应一个并行机器人；
+    #          第 0/3 维表示左右虚拟腿摆角目标的归一化动作，第 1/4 维表示左右虚拟腿长度目标的归一化动作，
+    #          第 2/5 维表示左右轮速度目标的归一化动作。
+    #
+    # 输出：
+    # 返回值：一个形状与真实自由度数量一致的关节力矩张量；它会在 step(...) 中写入 Isaac Gym，
+    #        作为下一次物理积分实际施加到机器人各关节上的执行器力矩。
     def _compute_torques(self, actions):
         """Compute torques from actions.
             Actions can be interpreted as position or velocity targets given to a PD controller, or directly as scaled torques.
@@ -376,6 +443,10 @@ class LeggedRobotVMC(LeggedRobot):
         Returns:
             [torch.Tensor]: Torques sent to the simulation
         """
+        # 先把策略动作从无量纲范围转换成 VMC 控制器使用的物理目标：
+        # 左右虚拟腿摆角目标用于控制腿相对机体竖直方向的偏转；
+        # 左右虚拟腿长度目标用于控制髋部到轮/足端等效连线的长度；
+        # 左右轮速度目标仍然直接用于轮关节速度控制。
         theta0_ref = (
             torch.cat(
                 (
@@ -407,6 +478,9 @@ class LeggedRobotVMC(LeggedRobot):
             * self.cfg.control.action_scale_vel
         )
 
+        # 用虚拟腿层面的 PD 控制律生成等效控制量：
+        # 摆角误差被转换成虚拟腿摆动方向的力矩，腿长误差被转换成沿虚拟腿方向的轴向力；
+        # 轮关节不经过虚拟腿几何映射，仍然用轮速误差直接生成轮关节力矩。
         self.torque_leg = (
             self.theta_kp * (theta0_ref - self.theta0) - self.theta_kd * self.theta0_dot
         )
@@ -418,6 +492,8 @@ class LeggedRobotVMC(LeggedRobot):
             self.force_leg + self.cfg.control.feedforward_force, self.torque_leg
         )
 
+        # 将虚拟模型控制得到的左右腿两段关节力矩和左右轮力矩拼回真实机器人 6 个自由度的顺序。
+        # 右腿的两个腿部关节取负号，是为了把统一虚拟腿坐标系下的力矩方向转换回 URDF 中镜像安装的右腿关节方向。
         torques = torch.cat(
             (
                 T1[:, 0].unsqueeze(1),
@@ -430,6 +506,7 @@ class LeggedRobotVMC(LeggedRobot):
             axis=1,
         )
 
+        # 最后应用电机力矩随机缩放并限制到关节允许的力矩范围内，避免向仿真器发送超出执行器能力的命令。
         return torch.clip(
             torques * self.torques_scale, -self.torque_limits, self.torque_limits
         )
@@ -455,6 +532,22 @@ class LeggedRobotVMC(LeggedRobot):
 
         return T1, T2
 
+    # 作用：
+    # 这个函数为策略网络实际接收的普通观测构造逐维噪声幅值表，用于训练时给观测加入随机扰动，
+    # 使策略对传感器误差和状态估计误差更鲁棒。
+    #
+    # 输入：
+    # cfg：调用方传入的环境参数对象；当前实现没有直接读取这个参数，而是使用当前环境对象保存的参数，
+    #      其中包含是否启用观测噪声、各类观测量的基础噪声强度以及观测归一化比例。
+    #
+    # 输出：
+    # noise_vec：返回一个与单个环境普通观测同长度的张量；每个位置表示该观测维度
+    #            中允许加入的最大噪声幅值(已进行缩放），后续会和 [-1, 1] 区间内的随机数相乘，
+    #            再加到策略网络看到的普通观测上，因此第 i 维实际加噪范围是 [-noise_vec[i], +noise_vec[i]]。
+    #
+    #            例如原始机体角速度是 2.0 rad/s，观测缩放比例是 0.25，那么策略网络看到的是 0.5；
+    #            如果原始角速度噪声上限是 0.2 rad/s，那么这里保存的缩放后噪声上限就是 0.2 * 0.25 = 0.05，
+    #            最终会给 0.5 这个缩放后观测值加入 [-0.05, +0.05] 范围内的随机扰动。
     def _get_noise_scale_vec(self, cfg):
         """Sets a vector used to scale the noise added to the observations.
             [NOTE]: Must be adapted when changing the observations structure
@@ -465,6 +558,8 @@ class LeggedRobotVMC(LeggedRobot):
         Returns:
             [torch.Tensor]: Vector of scales used to multiply a uniform distribution in [-1, 1]
         """
+        # 先创建与单个环境普通观测同长度的噪声幅值表，并从环境配置中取出总开关、
+        # 各类物理量的基础噪声强度和全局噪声倍率。
         noise_vec = torch.zeros_like(self.obs_buf[0])
         self.add_noise = self.cfg.noise.add_noise
         noise_scales = self.cfg.noise.noise_scales
@@ -482,6 +577,8 @@ class LeggedRobotVMC(LeggedRobot):
         #     noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
         # )
         # noise_vec[20 + 3 : 26 + 3] = 0.0  # previous actions
+        # 下面的切片顺序必须和当前类构造普通观测的顺序保持一致：
+        # 机体角速度、重力方向、运动命令、虚拟腿摆角和腿长、轮关节状态以及上一时刻策略动作。
         noise_vec[:3] = noise_scales.ang_vel * noise_level * self.obs_scales.ang_vel
         noise_vec[3:6] = noise_scales.gravity * noise_level
         noise_vec[6:8] = 0.0  # commands
@@ -492,6 +589,8 @@ class LeggedRobotVMC(LeggedRobot):
         noise_vec[16:18] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
         noise_vec[18:20] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
         noise_vec[20:26] = 0.0  # previous actions
+        # 如果当前地形配置启用了高度测量观测，则为局部地形高度采样部分也设置噪声幅值；
+        # 这些高度采样值用于让策略感知机器人周围地形起伏。
         if self.cfg.terrain.measure_heights:
             noise_vec[48:235] = (
                 noise_scales.height_measurements
