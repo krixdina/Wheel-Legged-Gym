@@ -1,0 +1,391 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="wheel_legged_v4">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="-0.019 -0.004 0.143"
+        rpy="0 0 0" />
+      <mass
+        value="16.524" />
+      <inertia
+        ixx="0.251141"
+        ixy="-0.007565"
+        ixz="0.003735"
+        iyy="0.369127"
+        iyz="0.009545"
+        izz="0.294251" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="left_thigh_link">
+    <inertial>
+      <origin
+        xyz="-0.091239 0.044903 0.001285"
+        rpy="0 0 0" />
+      <mass
+        value="0.450" />
+      <inertia
+        ixx="0.000454"
+        ixy="0.000609"
+        ixz="0.000003"
+        iyy="0.001273"
+        iyz="0.000001"
+        izz="0.001710" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/left_thigh_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/left_thigh_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="left_thigh_joint"
+    type="continuous">
+    <origin
+      xyz="0 0.162500000000001 0.115879159638825"
+      rpy="-1.5707963267949 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="left_thigh_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-3.14"
+      upper="3.14"
+      effort="30"
+      velocity="1000" />
+  </joint>
+  <link
+    name="left_leg_link">
+    <inertial>
+      <origin
+        xyz="0.088484 0.050904 -0.000358"
+        rpy="0 0 0" />
+      <mass
+        value="0.2756" />
+      <inertia
+        ixx="0.000815"
+        ixy="-0.001178"
+        ixz="0.000005"
+        iyy="0.001946"
+        iyz="0.000003"
+        izz="0.002751" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/left_leg_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/left_leg_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="left_leg_joint"
+    type="revolute">
+    <origin
+      xyz="-0.18482 0.099701 0.018"
+      rpy="0 0 0" />
+    <parent
+      link="left_thigh_link" />
+    <child
+      link="left_leg_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1"
+      upper="0.65"
+      effort="30"
+      velocity="1000" />
+  </joint>
+  <link
+    name="left_wheel_link">
+    <inertial>
+      <origin
+        xyz="0.000 0.000 0.011"
+        rpy="0 0 0" />
+      <mass
+        value="0.350" />
+      <inertia
+        ixx="0.000283"
+        ixy="0.00000"
+        ixz="0.000001"
+        iyy="0.000282"
+        iyz="0.000001"
+        izz="0.000537" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/left_wheel_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/left_wheel_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="left_wheel_joint"
+    type="continuous">
+    <origin
+      xyz="0.21482 0.12787 0.022043"
+      rpy="0 0 0" />
+    <parent
+      link="left_leg_link" />
+    <child
+      link="left_wheel_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      effort="5"
+      velocity="1000" />
+  </joint>
+  <link
+    name="right_thigh_link">
+    <inertial>
+      <origin
+        xyz="-0.096 -0.034 0.001"
+        rpy="0 0 0" />
+      <mass
+        value="0.450" />
+      <inertia
+        ixx="0.000319"
+        ixy="-0.000492"
+        ixz="0.000003"
+        iyy="0.001407"
+        iyz="-0.000001"
+        izz="0.001710" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/right_thigh_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.866666666666667 0.909803921568627 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/right_thigh_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="right_thigh_joint"
+    type="continuous">
+    <origin
+      xyz="0 -0.1625 0.11588"
+      rpy="1.5708 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="right_thigh_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-3.14"
+      upper="3.14"
+      effort="30"
+      velocity="1000" />
+  </joint>
+  <link
+    name="right_leg_link">
+    <inertial>
+      <origin
+        xyz="0.089 -0.0495 -0.00036"
+        rpy="0 0 0" />
+      <mass
+        value="0.2756" />
+      <inertia
+        ixx="0.000779"
+        ixy="0.00116"
+        ixz="0.000005"
+        iyy="0.001982"
+        iyz="-0.000003"
+        izz="0.00275" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/right_leg_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/right_leg_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="right_leg_joint"
+    type="revolute">
+    <origin
+      xyz="-0.19554 -0.076574 0.018"
+      rpy="0 0 0" />
+    <parent
+      link="right_thigh_link" />
+    <child
+      link="right_leg_link" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-0.5"
+      upper="1.05"
+      effort="30"
+      velocity="1000" />
+  </joint>
+  <link
+    name="right_wheel_link">
+    <inertial>
+      <origin
+        xyz="-0.00026 0.000 0.0115"
+        rpy="0 0 0" />
+      <mass
+        value="0.350" />
+      <inertia
+        ixx="0.000283"
+        ixy="0.000"
+        ixz="-0.000001"
+        iyy="0.000282"
+        iyz="0.000"
+        izz="0.000537" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/right_wheel_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://wheel_legged_v4/meshes/right_wheel_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="right_wheel_joint"
+    type="continuous">
+    <origin
+      xyz="0.21678 -0.12453 0.022043"
+      rpy="0 0 0" />
+    <parent
+      link="right_leg_link" />
+    <child
+      link="right_wheel_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      effort="5"
+      velocity="1000" />
+  </joint>
+</robot>
