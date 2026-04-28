@@ -40,6 +40,18 @@ from .wheel_legged_vmc_flat.wheel_legged_vmc_flat_config import (
     WheelLeggedVMCFlatCfg,
     WheelLeggedVMCFlatCfgPPO,
 )
+from .wheel_legged_fyt.wheel_legged_fyt_config import (
+    WheelLeggedFYTCfg,
+    WheelLeggedFYTCfgPPO,
+)
+from .wheel_legged_vmc_fyt.wheel_legged_vmc_fyt_config import (
+    WheelLeggedVMCFYTCfg,
+    WheelLeggedVMCFYTCfgPPO,
+)
+from .wheel_legged_vmc_flat_fyt.wheel_legged_vmc_flat_fyt_config import (
+    WheelLeggedVMCFlatFYTCfg,
+    WheelLeggedVMCFlatFYTCfgPPO,
+)
 
 
 import os
@@ -63,4 +75,19 @@ task_registry.register(
     LeggedRobotVMC,  # 环境类作为稍后创建仿真环境的入口，此处不要加括号提前实例化。
     WheelLeggedVMCFlatCfg(),  # 环境配置对象，保存地形、观测、奖励等任务参数。
     WheelLeggedVMCFlatCfgPPO(),  # 训练配置对象，保存策略网络、PPO 算法和 runner 参数。
+)
+task_registry.register(
+    "wheel_legged_fyt", LeggedRobot, WheelLeggedFYTCfg(), WheelLeggedFYTCfgPPO()
+)
+task_registry.register(
+    "wheel_legged_vmc_fyt",
+    LeggedRobotVMC,
+    WheelLeggedVMCFYTCfg(),
+    WheelLeggedVMCFYTCfgPPO(),
+)
+task_registry.register(
+    "wheel_legged_vmc_flat_fyt",
+    LeggedRobotVMC,
+    WheelLeggedVMCFlatFYTCfg(),
+    WheelLeggedVMCFlatFYTCfgPPO(),
 )

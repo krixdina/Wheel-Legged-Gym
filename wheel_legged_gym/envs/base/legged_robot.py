@@ -1518,6 +1518,8 @@ class LeggedRobot(BaseTask):
         self.num_bodies = len(body_names)
         self.num_dofs = len(self.dof_names)
         feet_names = [s for s in body_names if self.cfg.asset.foot_name in s]
+        # 根据配置里的关键字，从 URDF/资产刚体名称中筛出需要计入碰撞惩罚的身体部位。
+        # 这里保存的是刚体名称，后面会转换成 Isaac Gym 的刚体索引。
         penalized_contact_names = []
         for name in self.cfg.asset.penalize_contacts_on:
             penalized_contact_names.extend([s for s in body_names if name in s])
