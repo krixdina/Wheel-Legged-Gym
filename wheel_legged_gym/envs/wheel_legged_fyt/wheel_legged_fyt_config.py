@@ -5,17 +5,17 @@ from wheel_legged_gym.envs.base.legged_robot_config import (
 
 
 class WheelLeggedFYTCfg(LeggedRobotCfg):
-    # FYT v1 keeps the original task/control values and only swaps the robot
-    # asset plus name-based joint/contact configuration.
+    # FYT v4 keeps the original task/control values and swaps in the updated
+    # wheel_legged_fyt robot asset plus name-based joint/contact configuration.
 
     class init_state(LeggedRobotCfg.init_state):
         pos = [0.0, 0.0, 0.30]  # x,y,z [m]
         default_joint_angles = {  # target angles when action = 0.0
-            "left_thigh_joint": 0.0,
-            "left_leg_joint": -0.45,
+            "left_thigh_joint": -0.4,
+            "left_leg_joint": 0.6,
             "left_wheel_joint": 0.0,
-            "right_thigh_joint": 0.05,
-            "right_leg_joint": 0.45,
+            "right_thigh_joint": 0.4,
+            "right_leg_joint": 0.6,
             "right_wheel_joint": 0.0,
         }
 

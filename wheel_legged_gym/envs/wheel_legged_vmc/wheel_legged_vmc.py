@@ -84,10 +84,10 @@ class LeggedRobotVMC(LeggedRobot):
         self.render()
         self.pre_physics_step()
         for _ in range(self.cfg.control.decimation):
-            # 先根据当前仿真返回的关节位置和速度，计算虚拟腿的实际状态：
+            # 先根据当前仿真返回的关节位置和速度，计算当前虚拟腿的实际状态：
             # self.L0 / self.theta0 是当前真实腿长和等效腿摆角，
             # self.L0_dot / self.theta0_dot 是对应变化率。
-            # 它们是 VMC 控制器的状态量；策略 actions 中的腿长和摆角维度则是目标参考量。
+            # 它们是 VMC 控制器的状态量；策略网络输出 actions 作为腿长和摆角的目标参考量。
             # 后续 _compute_torques(...) 会把动作目标转换成 l0_ref / theta0_ref，
             # 再用“目标 - 当前实际状态”的误差生成虚拟腿力和力矩。
             self.leg_post_physics_step()
@@ -108,6 +108,7 @@ class LeggedRobotVMC(LeggedRobot):
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
             self.compute_dof_vel()
+        # 计算奖励
         self.post_physics_step()
 
         # return clipped obs, clipped states (None), rewards, dones and infos
@@ -443,9 +444,9 @@ class LeggedRobotVMC(LeggedRobot):
         Returns:
             [torch.Tensor]: Torques sent to the simulation
         """
-        # 先把策略动作从无量纲范围转换成 VMC 控制器使用的物理目标：
+        # 将策略动作从无量纲范围转换成 VMC 控制器使用的物理目标：
         # 左右虚拟腿摆角目标用于控制腿相对机体竖直方向的偏转；
-        # 左右虚拟腿长度目标用于控制髋部到轮/足端等效连线的长度；
+        # 左右虚拟腿长度目标用于控制髋部到驱动轮端的等效连线的长度；
         # 左右轮速度目标仍然直接用于轮关节速度控制。
         theta0_ref = (
             torch.cat(
