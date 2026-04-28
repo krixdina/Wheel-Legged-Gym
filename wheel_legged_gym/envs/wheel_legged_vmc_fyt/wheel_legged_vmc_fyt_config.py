@@ -15,7 +15,7 @@ class WheelLeggedVMCFYTCfg(WheelLeggedFYTCfg):
         action_scale_l0 = 0.1
         action_scale_vel = 10.0
 
-        l0_offset = 0.390
+        l0_offset = 0.255
         feedforward_force = 40.0  # [N]
 
         kp_theta = 50.0  # [N*m/rad]

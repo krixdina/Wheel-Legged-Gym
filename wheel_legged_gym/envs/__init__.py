@@ -32,6 +32,7 @@ from wheel_legged_gym import WHEEL_LEGGED_GYM_ROOT_DIR, WHEEL_LEGGED_GYM_ENVS_DI
 from .base.legged_robot import LeggedRobot
 from .wheel_legged.wheel_legged_config import WheelLeggedCfg, WheelLeggedCfgPPO
 from .wheel_legged_vmc.wheel_legged_vmc import LeggedRobotVMC
+from .wheel_legged_vmc_fyt.wheel_legged_vmc_fyt import LeggedRobotVMCFYT
 from .wheel_legged_vmc.wheel_legged_vmc_config import (
     WheelLeggedVMCCfg,
     WheelLeggedVMCCfgPPO,
@@ -81,13 +82,13 @@ task_registry.register(
 )
 task_registry.register(
     "wheel_legged_vmc_fyt",
-    LeggedRobotVMC,
+    LeggedRobotVMCFYT,
     WheelLeggedVMCFYTCfg(),
     WheelLeggedVMCFYTCfgPPO(),
 )
 task_registry.register(
     "wheel_legged_vmc_flat_fyt",
-    LeggedRobotVMC,
+    LeggedRobotVMCFYT,
     WheelLeggedVMCFlatFYTCfg(),
     WheelLeggedVMCFlatFYTCfgPPO(),
 )
