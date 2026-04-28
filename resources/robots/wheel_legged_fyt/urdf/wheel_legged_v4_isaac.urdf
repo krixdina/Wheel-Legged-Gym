@@ -153,10 +153,10 @@
     <child
       link="left_leg_link" />
     <axis
-      xyz="0 0 -1" />
+      xyz="0 0 1" />
     <limit
-      lower="-0.7"
-      upper="1.2"
+      lower="-1.2"
+      upper="0.7"
       effort="30"
       velocity="1000" />
   </joint>
@@ -213,7 +213,7 @@
     <axis
       xyz="0 0 1" />
     <limit
-      effort="5"
+      effort="4.5"
       velocity="1000" />
   </joint>
   <link
@@ -325,10 +325,10 @@
     <child
       link="right_leg_link" />
     <axis
-      xyz="0 0 -1" />
+      xyz="0 0 1" />
     <limit
-      lower="-1.2"
-      upper="0.7"
+      lower="-0.7"
+      upper="1.2"
       effort="30"
       velocity="1000" />
   </joint>
@@ -385,7 +385,7 @@
     <axis
       xyz="0 0 1" />
     <limit
-      effort="5"
+      effort="4.5"
       velocity="1000" />
   </joint>
 </robot>
