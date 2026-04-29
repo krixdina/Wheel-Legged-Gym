@@ -12,7 +12,7 @@ class WheelLeggedFYTCfg(LeggedRobotCfg):
         pos = [0.0, 0.0, 0.30]  # x,y,z [m]
         default_joint_angles = {  # target angles when action = 0.0
             "left_thigh_joint": -0.4,
-            "left_leg_joint": 0.6,
+            "left_leg_joint": -0.6,
             "left_wheel_joint": 0.0,
             "right_thigh_joint": 0.4,
             "right_leg_joint": 0.6,
