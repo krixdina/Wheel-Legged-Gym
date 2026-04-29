@@ -221,7 +221,7 @@ class LeggedRobot(BaseTask):
     #
     # 输出：
     # 无显示返回值；它会更新由 self.dof_pos_dot 表示的关节速度估计。
-    # 如果参数 self.cfg.env.dof_vel_use_pos_diff 为 True，表示使用差分速度替代 Isaac Gym 状态张量中直接提供的关节速度。，
+    # 如果参数 self.cfg.env.dof_vel_use_pos_diff 为 True，表示使用差分速度替代 Isaac Gym 状态张量中直接提供的关节速度。
     # 最后它会刷新 self.last_dof_pos 表示的上一物理步关节角度缓存，供下一次差分使用。
     def compute_dof_vel(self):
         # 计算相邻两个物理步之间的最短角度差。

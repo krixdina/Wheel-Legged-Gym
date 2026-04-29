@@ -83,6 +83,14 @@ class LeggedRobotVMC(LeggedRobot):
         # step physics and render each frame
         self.render()
         self.pre_physics_step()
+        # 坐标与力矩方向的处理分成两步：
+        # 1. leg_post_physics_step() 读取 Isaac Gym/URDF 的原始关节角 q，
+        #    并把左右腿映射到同一个 VMC 平面坐标 theta 中。这里不是把负角
+        #    “变成正角”，也没有丢掉方向信息，而是把 URDF 的左右镜像正方向统一
+        #    到 VMC 使用的坐标约定；
+        # 2. _compute_torques() 先在统一的 VMC 坐标系下计算广义力矩 T1/T2，
+        #    然后在拼接 torques 时再按 theta 与原始 q 的符号关系，把力矩方向
+        #    映射回仿真器要求的 URDF 方向。
         for _ in range(self.cfg.control.decimation):
             # 先根据当前仿真返回的关节位置和速度，计算当前虚拟腿的实际状态：
             # self.L0 / self.theta0 是当前真实腿长和等效腿摆角，
@@ -517,7 +525,8 @@ class LeggedRobotVMC(LeggedRobot):
         t11 = self.cfg.asset.l1 * torch.sin(
             theta0 - self.theta1
         ) - self.cfg.asset.l2 * torch.sin(self.theta1 + self.theta2 - theta0)
-
+        
+        # 这一项结果存在问题，应该是 -self.cfg.asset.l1 * torch.cos(theta0 - self.theta1) 才对
         t12 = self.cfg.asset.l1 * torch.cos(
             theta0 - self.theta1
         ) - self.cfg.asset.l2 * torch.cos(self.theta1 + self.theta2 - theta0)
