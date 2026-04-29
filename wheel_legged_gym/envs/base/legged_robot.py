@@ -211,16 +211,33 @@ class LeggedRobot(BaseTask):
             self.obs_history,
         )
 
+    # 作用：
+    # 这个函数在每个底层物理仿真步刷新关节状态后，根据当前关节角度和上一物理步缓存的关节角度估算关节速度。
+    # 它额外处理旋转关节跨越 -pi/pi 边界时的角度跳变，避免速度估计因为角度表示方式突然变化而出现异常大值。
+    #
+    # 输入：
+    # 无显式参数；它读取 self.dof_pos 表示的当前关节角度、
+    # self.last_dof_pos 表示的上一物理步关节角度缓存，以及 self.sim_params.dt 表示的底层物理仿真步长。
+    #
+    # 输出：
+    # 无显示返回值；它会更新由 self.dof_pos_dot 表示的关节速度估计。
+    # 如果参数 self.cfg.env.dof_vel_use_pos_diff 为 True，表示使用差分速度替代 Isaac Gym 状态张量中直接提供的关节速度。，
+    # 最后它会刷新 self.last_dof_pos 表示的上一物理步关节角度缓存，供下一次差分使用。
     def compute_dof_vel(self):
+        # 计算相邻两个物理步之间的最短角度差。
+        # 这里把角度差包回 [-pi, pi) 范围，是为了让旋转关节在跨越圆周边界时仍得到连续的小角度变化。
         diff = (
             torch.remainder(self.dof_pos - self.last_dof_pos + self.pi, 2 * self.pi)
             - self.pi
         )
         self.dof_pos_dot = diff / self.sim_params.dt
 
+        # 根据配置选择是否用“位置差除以物理步长”得到的速度估计，
+        # 替代 Isaac Gym 状态张量中直接提供的关节速度。
         if self.cfg.env.dof_vel_use_pos_diff:
             self.dof_vel = self.dof_pos_dot
 
+        # 保存本物理步的关节角度，作为下一次速度差分的历史参考。
         self.last_dof_pos[:] = self.dof_pos[:]
 
     # 作用：
@@ -1470,7 +1487,7 @@ class LeggedRobot(BaseTask):
             .view(self.terrain.tot_rows, self.terrain.tot_cols)
             .to(self.device)
         )
-    
+
     # URDF 文件在该函数中被加载到仿真中
     def _create_envs(self):
         """Creates environments:

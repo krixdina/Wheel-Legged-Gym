@@ -4,26 +4,24 @@ from wheel_legged_gym.envs.wheel_legged_vmc.wheel_legged_vmc import LeggedRobotV
 
 
 class LeggedRobotVMCFYT(LeggedRobotVMC):
-    """FYT-specific VMC geometry adapter.
+    """FYT 机器人专用的 VMC 几何适配层。
 
-    The FYT URDF keeps the same 6-DOF topology as the original robot, but its
-    lower-leg joints rotate around -z and the thigh-to-leg joint offset points
-    along -x. This class adapts the VMC kinematics and torque mapping without
-    changing the original URDF or the upstream LeggedRobotVMC implementation.
+    FYT 与原机器人拓扑一致，但腿部连杆在 URDF 中的几何展开方向不同：
+    thigh -> leg 这一段沿局部 -x 方向，而原项目按 +x 方向建模。
+    因此这里只覆盖 VMC 相关的几何量计算和力矩映射，不修改原始 LeggedRobotVMC。
     """
 
     def leg_post_physics_step(self):
-        # Unify left/right thigh angles into one planar VMC convention.
+        # 将 Isaac Gym 返回的左右腿 URDF 关节角转换到统一的平面二连杆坐标系。
+        # FYT 已将左右 leg_joint 的 axis 调整为 0 0 1，因此小腿角速度/角度不再需要额外反号；
+        # 右大腿仍按原项目约定取负号，用来把镜像安装的左右腿统一到同一几何坐标系。
         self.theta1 = torch.cat(
             (self.dof_pos[:, 0].unsqueeze(1), -self.dof_pos[:, 3].unsqueeze(1)), dim=1
         )
-
-        # FYT lower-leg joints use axis="0 0 -1", so positive URDF joint motion
-        # corresponds to negative planar rotation in the VMC convention.
         self.theta2 = torch.cat(
             (
-                (-self.dof_pos[:, 1] + self.pi / 2).unsqueeze(1),
-                (-self.dof_pos[:, 4] + self.pi / 2).unsqueeze(1),
+                (self.dof_pos[:, 1] + self.pi / 2).unsqueeze(1),
+                (self.dof_pos[:, 4] + self.pi / 2).unsqueeze(1),
             ),
             dim=1,
         )
@@ -32,7 +30,7 @@ class LeggedRobotVMCFYT(LeggedRobotVMC):
             (self.dof_vel[:, 0].unsqueeze(1), -self.dof_vel[:, 3].unsqueeze(1)), dim=1
         )
         theta2_dot = torch.cat(
-            (-self.dof_vel[:, 1].unsqueeze(1), -self.dof_vel[:, 4].unsqueeze(1)), dim=1
+            (self.dof_vel[:, 1].unsqueeze(1), self.dof_vel[:, 4].unsqueeze(1)), dim=1
         )
 
         self.L0, self.theta0 = self.forward_kinematics(self.theta1, self.theta2)
@@ -46,8 +44,8 @@ class LeggedRobotVMCFYT(LeggedRobotVMC):
         self.theta0_dot = (theta0_temp - self.theta0) / dt
 
     def forward_kinematics(self, theta1, theta2):
-        # FYT thigh-to-leg joint offset points along -x, while the wheel offset
-        # still forms the second segment after the lower-leg joint rotation.
+        # FYT 的第一段腿从大腿关节指向小腿关节时沿局部 -x 方向；
+        # 第二段仍用 theta1 + theta2 表示驱动轮相对髋部的末端方向。
         phi = theta1 + theta2
         end_x = (
             self.cfg.asset.offset
@@ -63,6 +61,8 @@ class LeggedRobotVMCFYT(LeggedRobotVMC):
         return L0, theta0
 
     def _compute_torques(self, actions):
+        # action 仍沿用原 VMC 定义：
+        # [左腿摆角, 左腿长, 左轮速, 右腿摆角, 右腿长, 右轮速] 的无量纲偏移。
         theta0_ref = (
             torch.cat(
                 (
@@ -105,15 +105,16 @@ class LeggedRobotVMCFYT(LeggedRobotVMC):
             self.force_leg + self.cfg.control.feedforward_force, self.torque_leg
         )
 
-        # Map VMC generalized torques back to FYT URDF DOF torque signs:
-        # theta1 = [q0, -q3], theta2 = [-q1 + pi/2, -q4 + pi/2].
+        # 将 VMC 几何坐标系下的广义力矩映射回 FYT URDF 的 6 个 DOF。
+        # theta1 = [q0, -q3]，theta2 = [q1 + pi/2, q4 + pi/2]；
+        # 因此右大腿力矩需要取负，小腿两侧不再因 axis 反向而取负。
         torques = torch.cat(
             (
                 T1[:, 0].unsqueeze(1),
-                -T2[:, 0].unsqueeze(1),
+                T2[:, 0].unsqueeze(1),
                 self.torque_wheel[:, 0].unsqueeze(1),
                 -T1[:, 1].unsqueeze(1),
-                -T2[:, 1].unsqueeze(1),
+                T2[:, 1].unsqueeze(1),
                 self.torque_wheel[:, 1].unsqueeze(1),
             ),
             axis=1,
@@ -124,8 +125,9 @@ class LeggedRobotVMCFYT(LeggedRobotVMC):
         )
 
     def VMC(self, F, T):
-        # Virtual work mapping for the FYT forward kinematics:
-        # tau_q = F * dL/dq + T * dtheta0/dq.
+        # 根据 FYT forward_kinematics 对 L0 和 theta0 求雅可比。
+        # 使用虚功关系 tau = F * dL/dq + T * dtheta0/dq，
+        # 保证前向运动学和虚拟力到关节力矩的映射使用同一套几何约定。
         phi = self.theta1 + self.theta2
         x = (
             self.cfg.asset.offset
@@ -136,12 +138,12 @@ class LeggedRobotVMCFYT(LeggedRobotVMC):
             phi
         )
 
-        dx_dtheta1 = self.cfg.asset.l1 * torch.sin(self.theta1) - self.cfg.asset.l2 * torch.sin(
-            phi
-        )
-        dy_dtheta1 = -self.cfg.asset.l1 * torch.cos(self.theta1) + self.cfg.asset.l2 * torch.cos(
-            phi
-        )
+        dx_dtheta1 = self.cfg.asset.l1 * torch.sin(
+            self.theta1
+        ) - self.cfg.asset.l2 * torch.sin(phi)
+        dy_dtheta1 = -self.cfg.asset.l1 * torch.cos(
+            self.theta1
+        ) + self.cfg.asset.l2 * torch.cos(phi)
         dx_dtheta2 = -self.cfg.asset.l2 * torch.sin(phi)
         dy_dtheta2 = self.cfg.asset.l2 * torch.cos(phi)
 
