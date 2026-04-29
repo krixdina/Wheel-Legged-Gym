@@ -199,7 +199,8 @@ class LeggedRobotVMC(LeggedRobot):
             dim=1,
         )
 
-        # 速度项必须使用与 theta1/theta2 完全一致的符号约定；
+        # 因为速度项需要转到 VMC 坐标系下参与 theta0_dot 的计算
+        # 所以速度项必须使用与 theta1/theta2 完全一致的符号约定,
         # pi/2 是常量偏置，对速度求导后为 0，因此这里只需要对右腿速度取负。
         theta1_dot = torch.cat(
             (self.dof_vel[:, 0].unsqueeze(1), -self.dof_vel[:, 3].unsqueeze(1)), dim=1
