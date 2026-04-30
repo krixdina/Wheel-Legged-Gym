@@ -173,8 +173,27 @@ class OnPolicyRunner:
 
                     if self.log_dir is not None:
                         # Book keeping
-                        # 只在写日志时维护回合级统计；某个环境结束后，把它的累计奖励和累计长度放入滑动窗口。
+                        # 如果本轮 step 没有环境结束，reset_idx() 不会生成新的 episode 统计；
+                        # 但 extras 当前不会每步清空，因此 infos["episode"] 可能保留上一次写入的旧值。
+                        # 如果后续某轮 step 有环境结束，reset_idx() 会用当前结束环境的统计覆盖旧值。
+                        # 返回的 infos 结构大致如下：rew_* 是当前步结束环境的奖励分项均值，
+                        # a_flat_max_command_x 等课程字段记录当前命令/课程状态，不一定只对应本批结束环境。
+                        # infos = {
+                        #     "episode": {
+                        #         "rew_tracking_lin_vel": tensor(...),
+                        #         "rew_tracking_ang_vel": tensor(...),
+                        #         "rew_collision": tensor(...),
+                        #         "rew_torques": tensor(...),
+                        #         "a_flat_max_command_x": tensor(...),
+                        #         ...
+                        #     },
+                        #     "time_outs": tensor([False, False, True, ..., False])
+                        # }
+                        #
+                        # 需要注意的是 Train/mean_reward 和 Train/mean_episode_length 不受这个 episode 字段直接影响
+                        # 影响主要集中在 Episode/rew_xxx 这些分项 TensorBoard 曲线中
                         if "episode" in infos:
+                            # ep_infos 收集当前 PPO iteration 的 rollout 中每次看到的 infos["episode"]。
                             ep_infos.append(infos["episode"])
                         cur_reward_sum += rewards
                         cur_episode_length += 1
@@ -230,9 +249,12 @@ class OnPolicyRunner:
         self.tot_time += locs["collection_time"] + locs["learn_time"]
         iteration_time = locs["collection_time"] + locs["learn_time"]
 
-        # 汇总环境在 episode 结束时返回的指标，例如各奖励项或任务统计量，并记录每个指标的平均值。
+        # 汇总当前 PPO iteration 的 rollout 过程中收集到的 episode 级统计。
+        # ep_infos 里的每个元素都是一次 infos["episode"]，其中 rew_* 在环境侧已经是某一批结束环境的奖励分项均值。
         ep_string = f""
         if locs["ep_infos"]:
+            # 这里按 ep_infos 中实际收集到的条目求平均，不是按 num_steps_per_env 求平均。
+            # 如果上游 infos["episode"] 因 extras 未清空而保留旧值，这里会照样把这些条目纳入聚合。
             for key in locs["ep_infos"][0]:
                 infotensor = torch.tensor([], device=self.device)
                 for ep_info in locs["ep_infos"]:
@@ -241,11 +263,13 @@ class OnPolicyRunner:
                         ep_info[key] = torch.Tensor([ep_info[key]])
                     if len(ep_info[key].shape) == 0:
                         ep_info[key] = ep_info[key].unsqueeze(0)
+                    # 将当前 iteration 内同一个 key 的多次 episode 统计拼起来，
+                    # 后面再求均值并写入 TensorBoard 的 Episode/<key> 曲线。
                     infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
                 value = torch.mean(infotensor)
                 self.writer.add_scalar("Episode/" + key, value, locs["it"])
                 ep_string += f"""{f'Mean {key}:':>{pad}} {value:.4f}\n"""
-        # 计算策略动作分布的平均噪声大小和本轮训练速度，用于观察探索强度与训练性能。
+        # 计算策略动作分布的平均标准差大小(所有动作维度的标准差取平均值)和本轮训练速度，用于观察探索强度与训练性能。
         mean_std = self.alg.actor_critic.std.mean()
         # 这里的 fps 不是渲染帧率，而是训练吞吐率：
         # 本轮采样出的 transition 总数，除以“采样 rollout + PPO 更新”的总耗时。
