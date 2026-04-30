@@ -140,33 +140,22 @@ class LeggedRobotVMCFYT(LeggedRobotVMC):
         )
 
     def VMC(self, F, T):
-        # theta0 不加 pi/2?
-        phi = self.theta1 + self.theta2
-        x = (
-            self.cfg.asset.offset
-            + self.cfg.asset.l1 * torch.cos(self.theta1)
-            + self.cfg.asset.l2 * torch.cos(phi)
-        )
-        y = self.cfg.asset.l1 * torch.sin(self.theta1) + self.cfg.asset.l2 * torch.sin(
-            phi
-        )
-
-        dx_dtheta1 = -self.cfg.asset.l1 * torch.sin(
-            self.theta1
-        ) - self.cfg.asset.l2 * torch.sin(phi)
-        dy_dtheta1 = self.cfg.asset.l1 * torch.cos(
-            self.theta1
-        ) + self.cfg.asset.l2 * torch.cos(phi)
-        dx_dtheta2 = -self.cfg.asset.l2 * torch.sin(phi)
-        dy_dtheta2 = self.cfg.asset.l2 * torch.cos(phi)
-
+        # FYT 构型在 offset = 0 时可化简为闭式雅可比转置映射：
+        # [T1, T2]^T = [[0, 1], [J21, J22]] [F, T]^T。
         L0_sq = self.L0**2
-        dL_dtheta1 = (x * dx_dtheta1 + y * dy_dtheta1) / self.L0
-        dL_dtheta2 = (x * dx_dtheta2 + y * dy_dtheta2) / self.L0
-        dtheta0_dtheta1 = (x * dy_dtheta1 - y * dx_dtheta1) / L0_sq
-        dtheta0_dtheta2 = (x * dy_dtheta2 - y * dx_dtheta2) / L0_sq
+        J21 = -(
+            self.cfg.asset.l1
+            * self.cfg.asset.l2
+            * torch.sin(self.theta2)
+            / self.L0
+        )
+        J22 = (
+            self.cfg.asset.l2
+            * (self.cfg.asset.l1 * torch.cos(self.theta2) + self.cfg.asset.l2)
+            / L0_sq
+        )
 
-        T1 = dL_dtheta1 * F + dtheta0_dtheta1 * T
-        T2 = dL_dtheta2 * F + dtheta0_dtheta2 * T
+        T1 = T
+        T2 = J21 * F + J22 * T
 
         return T1, T2
