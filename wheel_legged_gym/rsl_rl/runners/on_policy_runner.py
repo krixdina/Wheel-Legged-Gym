@@ -195,15 +195,22 @@ class OnPolicyRunner:
                         if "episode" in infos:
                             # ep_infos 收集当前 PPO iteration 的 rollout 中每次看到的 infos["episode"]。
                             ep_infos.append(infos["episode"])
+                        # 这里维护的是 Train/mean_reward 和 Train/mean_episode_length 的来源，
+                        # 与上面的 ep_infos/Episode/rew_* 分项日志是两套统计口径。
+                        # cur_reward_sum 和 cur_episode_length 都按 env_id 分别累计当前 episode 的总奖励和长度。
                         cur_reward_sum += rewards
                         cur_episode_length += 1
                         new_ids = (dones > 0).nonzero(as_tuple=False)
+                        # 只有当前 step 刚结束的环境会进入 rewbuffer/lenbuffer；
+                        # 后续 TensorBoard 中的 Train/mean_reward 和 Train/mean_episode_length
+                        # 是这些已结束 episode 结果的滑动平均，不是单步 reward，也不是 Episode/rew_* 分项均值。
                         rewbuffer.extend(
                             cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist()
                         )
                         lenbuffer.extend(
                             cur_episode_length[new_ids][:, 0].cpu().numpy().tolist()
                         )
+                        # 已结束环境即将开始新的 episode，因此清零它们在 runner 侧维护的累计量。
                         cur_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
 
@@ -249,12 +256,11 @@ class OnPolicyRunner:
         self.tot_time += locs["collection_time"] + locs["learn_time"]
         iteration_time = locs["collection_time"] + locs["learn_time"]
 
-        # 汇总当前 PPO iteration 的 rollout 过程中收集到的 episode 级统计。
-        # ep_infos 里的每个元素都是一次 infos["episode"]，其中 rew_* 在环境侧已经是某一批结束环境的奖励分项均值。
+        # 汇总当前 PPO iteration 的 rollout 过程中收集到的 episode 统计。
+        # ep_infos 里的每个元素都是 step() 中返回的 infos["episode"]，其中 rew_* 在环境侧已经是某一批结束环境的奖励分项均值。
         ep_string = f""
         if locs["ep_infos"]:
             # 这里按 ep_infos 中实际收集到的条目求平均，不是按 num_steps_per_env 求平均。
-            # 如果上游 infos["episode"] 因 extras 未清空而保留旧值，这里会照样把这些条目纳入聚合。
             for key in locs["ep_infos"][0]:
                 infotensor = torch.tensor([], device=self.device)
                 for ep_info in locs["ep_infos"]:
@@ -263,7 +269,7 @@ class OnPolicyRunner:
                         ep_info[key] = torch.Tensor([ep_info[key]])
                     if len(ep_info[key].shape) == 0:
                         ep_info[key] = ep_info[key].unsqueeze(0)
-                    # 将当前 iteration 内同一个 key 的多次 episode 统计拼起来，
+                    # 将当前 PPO iteration 内同一个 key 的多次 episode 统计拼起来，
                     # 后面再求均值并写入 TensorBoard 的 Episode/<key> 曲线。
                     infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
                 value = torch.mean(infotensor)
