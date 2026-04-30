@@ -247,6 +247,9 @@ class OnPolicyRunner:
                 ep_string += f"""{f'Mean {key}:':>{pad}} {value:.4f}\n"""
         # 计算策略动作分布的平均噪声大小和本轮训练速度，用于观察探索强度与训练性能。
         mean_std = self.alg.actor_critic.std.mean()
+        # 这里的 fps 不是渲染帧率，而是训练吞吐率：
+        # 本轮采样出的 transition 总数，除以“采样 rollout + PPO 更新”的总耗时。
+        # 因此它反映的是整体训练流程每秒处理多少条环境交互数据。
         fps = int(
             self.num_steps_per_env
             * self.env.num_envs
@@ -264,6 +267,10 @@ class OnPolicyRunner:
         self.writer.add_scalar("Loss/learning_rate", self.alg.learning_rate, locs["it"])
         self.writer.add_scalar("Policy/mean_noise_std", mean_std.item(), locs["it"])
         self.writer.add_scalar("Policy/mean_kl", locs["mean_kl"], locs["it"])
+        # Perf 是 Performance 的缩写，用来把训练运行效率相关曲线归到同一组。
+        # total_fps 是包含学习耗时后的总体 transition 吞吐率；
+        # collection time 只统计 rollout 采样耗时；
+        # learning_time 只统计本轮 PPO/网络更新耗时。
         self.writer.add_scalar("Perf/total_fps", fps, locs["it"])
         self.writer.add_scalar(
             "Perf/collection time", locs["collection_time"], locs["it"]
