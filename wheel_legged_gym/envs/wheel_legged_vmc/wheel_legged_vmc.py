@@ -306,8 +306,22 @@ class LeggedRobotVMC(LeggedRobot):
         self.obs_history[env_ids] = obs_buf[env_ids].repeat(1, self.obs_history_length)
         # fill extras
         self.extras["episode"] = {}
+        # self.episode_sums 是一个字典，里面保存每个奖励项在当前 episode 内的累计值。
+        # 它的结构大概是：
+        #   字典的 key：奖励项名字
+        #   字典的 value：长度为 num_envs 的张量，每个元素对应一个并行环境的该奖励项累计值
+        #   self.episode_sums = {
+        #     "tracking_lin_vel": tensor([env0累计值, env1累计值, env2累计值, ...]),
+        #     "tracking_ang_vel": tensor([env0累计值, env1累计值, env2累计值, ...]),
+        #     "collision": tensor([env0累计值, env1累计值, env2累计值, ...]),
+        #     "torques": tensor([env0累计值, env1累计值, env2累计值, ...]),
+        #     ...
+        #   }
         for key in self.episode_sums.keys():
             self.extras["episode"]["rew_" + key] = (
+                # env_ids 中可能包含多个需要重置的环境，按照奖励类型 key 把对应的累计奖励值取出来，求平均后记录到 extras 里用于日志统计。
+                # 这里除的是配置中的最大 episode 时长，而不是这些环境实际存活时长；
+                # 因此前终止的 episode 会按满时长被摊薄，更像“相对满时长 episode 的归一化累计奖励”。
                 torch.mean(self.episode_sums[key][env_ids]) / self.max_episode_length_s
             )
             self.episode_sums[key][env_ids] = 0.0
@@ -526,7 +540,7 @@ class LeggedRobotVMC(LeggedRobot):
         t11 = self.cfg.asset.l1 * torch.sin(
             theta0 - self.theta1
         ) - self.cfg.asset.l2 * torch.sin(self.theta1 + self.theta2 - theta0)
-        
+
         # 这一项结果存在问题，应该是 -self.cfg.asset.l1 * torch.cos(theta0 - self.theta1) 才对
         t12 = self.cfg.asset.l1 * torch.cos(
             theta0 - self.theta1
