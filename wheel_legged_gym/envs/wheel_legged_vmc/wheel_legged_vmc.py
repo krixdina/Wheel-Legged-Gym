@@ -307,6 +307,7 @@ class LeggedRobotVMC(LeggedRobot):
         # fill extras
         self.extras["episode"] = {}
         # self.episode_sums 是一个字典，里面保存每个奖励项在当前 episode 内的累计值。
+        # 如果没有环境结束，则不会调用 reset_idx()，因此 extras 中也不会记录 episode 字段
         # 它的结构大概是：
         #   字典的 key：奖励项名字
         #   字典的 value：长度为 num_envs 的张量，每个元素对应一个并行环境的该奖励项累计值
@@ -321,9 +322,8 @@ class LeggedRobotVMC(LeggedRobot):
             self.extras["episode"]["rew_" + key] = (
                 # env_ids 中可能包含多个需要重置的环境，按照奖励类型 key 把对应的累计奖励值取出来，求平均后记录到 extras 里用于日志统计。
                 # 这里除的是配置中的最大 episode 时长，而不是这些环境实际存活时长；
-                # 因此前终止的 episode 会按满时长被摊薄，更像“相对满时长 episode 的归一化累计奖励”。
-                torch.mean(self.episode_sums[key][env_ids]) / self.max_episode_length_s
-            )
+                # 因此前终止的 episode reward 会因为除最大时长而降低，这样更强调完整 episode 表现，提前终止的奖励会被惩罚式地压低
+                torch.mean(self.episode_sums[key][env_ids]) / self.max_episode_length_s)
             self.episode_sums[key][env_ids] = 0.0
         # log additional curriculum info
         if self.cfg.terrain.curriculum:

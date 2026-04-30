@@ -202,8 +202,8 @@ class OnPolicyRunner:
                         cur_episode_length += 1
                         new_ids = (dones > 0).nonzero(as_tuple=False)
                         # 只有当前 step 刚结束的环境会进入 rewbuffer/lenbuffer；
-                        # 后续 TensorBoard 中的 Train/mean_reward 和 Train/mean_episode_length
-                        # 是这些已结束 episode 结果的滑动平均，不是单步 reward，也不是 Episode/rew_* 分项均值。
+                        # 后续 TensorBoard 中的 Train/mean_reward 和 Train/mean_episode_length 是这些已结束 episode 结果的滑动平均
+                        # 滑动平均的窗口大小由 deque 的 maxlen 参数控制，这里是 100，表示最近 100 个结束 episode 的平均表现。
                         rewbuffer.extend(
                             cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist()
                         )
