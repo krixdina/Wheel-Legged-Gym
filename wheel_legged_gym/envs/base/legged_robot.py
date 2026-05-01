@@ -447,15 +447,13 @@ class LeggedRobot(BaseTask):
             self.extras["time_outs"] = self.time_out_buf
 
     # 作用：
-    # 这个函数负责在每个环境控制步结束时，汇总当前所有已启用的奖励项，
-    # 生成并行环境这一时刻的总奖励，并把各奖励项在当前回合内分别累计起来。
-    # 上游由仿真后处理流程调用，下游则通过 self.rew_buf 把奖励返回给强化学习训练器，
-    # 用于 PPO 采样与更新。
+    # 这个函数负责在每个环境控制步（不是底层仿真步）结束时，汇总当前所有已启用的奖励项，
+    # 累计各奖励项在当前控制步内的具体奖励值，生成每一个并行环境当前控制步内的总奖励
+    # 通过 self.rew_buf 把奖励返回给强化学习训练器，用于 PPO 采样与更新。
     #
     # 输入：
     # 无显式参数；函数主要读取当前环境对象里的几类运行时状态：
-    # self.reward_functions 表示已经根据配置筛选并注册好的奖励函数列表，
-    # 其中每个元素都对应一个具体的奖励公式；
+    # self.reward_functions 表示已经根据配置筛选并注册好的奖励函数列表，其中每个元素都对应一个具体的奖励公式；
     # self.reward_scales 表示每个奖励项的权重，数值已经在初始化阶段按一个环境步对应的真实时长做过缩放；
     # self.reward_names 表示奖励函数列表中每一项对应的奖励名字；
     # 另外还会读取 self.cfg.rewards 里的裁剪和总奖励后处理配置。
@@ -463,7 +461,7 @@ class LeggedRobot(BaseTask):
     # 输出：
     # 这个函数没有显式返回值；它通过修改当前环境对象的内部状态产生效果。
     # self.rew_buf 会被写成“每个并行环境在当前这一步的总奖励”；
-    # self.episode_sums 会继续累计“每个并行环境在当前回合内各奖励项的累计值”，
+    # self.episode_sums 会继续累计“每个并行环境在当前 episode 内各奖励项的累计值”，
     # 供回合结束时记录日志和课程学习逻辑使用。
     def compute_reward(self):
         """Compute rewards
@@ -478,6 +476,7 @@ class LeggedRobot(BaseTask):
         # 最后同时写入“本步总奖励”和“当前回合分项累计奖励”。
         for i in range(len(self.reward_functions)):
             name = self.reward_names[i]
+            # reward_function 列表内存储的是奖励函数名称，取出后通过函数调用符 () 调用它。
             rew = self.reward_functions[i]() * self.reward_scales[name]
             rew = torch.clip(
                 rew,
@@ -1924,14 +1923,21 @@ class LeggedRobot(BaseTask):
     # ------------ reward functions----------------
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity
+        # base_lin_vel[:, 0/1/2]： base_link 坐标系下 x/y/z 方向线速度
+        # 惩罚机身竖直方向速度，抑制上下弹跳。
         return torch.square(self.base_lin_vel[:, 2])
 
     def _reward_ang_vel_xy(self):
         # Penalize xy axes base angular velocity
+        # base_ang_vel[:, 0/1/2]： base_link 坐标系下 roll/pitch/yaw 方向角速度
+        # 惩罚 roll/pitch 角速度，让机身别大幅前后/左右甩动。
         return torch.sum(torch.square(self.base_ang_vel[:, :2]), dim=1)
 
     def _reward_orientation(self):
         # Penalize non flat base orientation
+        # projected_gravity[:, 0/1/2]： 重力在 base_link 坐标系下 x/y/z 方向的投影分量
+        # 重力投影在机体系 x/y 上越大，说明机身越倾斜；这个项约束机身保持水平姿态。
+        # 如果机器人完全站正、机身不倾斜，那么重力在机体系里大致会接近 [0, 0, -9.81]
         return torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1)
 
     def _reward_base_height(self):
@@ -1940,11 +1946,30 @@ class LeggedRobot(BaseTask):
         if self.reward_scales["base_height"] < 0:
             return torch.abs(self.base_height - self.commands[:, 2])
         else:
+            # 鼓励机身高度贴近命令高度。误差越小越接近 1。
             base_height_error = torch.square(self.base_height - self.commands[:, 2])
             return torch.exp(-base_height_error / 0.001)
 
     def _reward_base_height_enhance(self):
+        # 这是“机身高度主奖励”的辅助塑形项，而不是一个更强的主奖励。
+        # 这里的 enhance 更适合在中文里理解成“增强训练信号的辅助项”：
+        # 当机器人离目标高度还比较远时，它能提供一个衰减更慢、更平滑的修正信号，
+        # 帮助策略先学会把高度往正确方向调回来；真正负责精确贴近目标高度的，仍是上面的 _reward_base_height(...)。
+
+        # base_height_error 表示“当前机身实际高度”和“当前命令给出的目标高度”之间的平方误差。
+        # 误差越小，说明机器人当前高度越接近想要的高度；误差越大，说明偏差越明显。
         base_height_error = torch.square(self.base_height - self.commands[:, 2])
+
+        # 这里使用指数衰减来构造一个平滑的辅助惩罚项：
+        # 1. 分母比主高度奖励更大，因此误差变大时衰减得更慢，能在较大误差范围内保留训练信号；
+        # 2. 末尾减去 1 之后，返回值范围从原来的 (0, 1] 变成 (-1, 0]：
+        #    - 当高度完全贴近目标时，返回 0，表示这项辅助惩罚可以自然退出；
+        #    - 当高度偏差较大时，返回接近 -1，表示持续给出负反馈。
+        # 所以它的角色更像“平滑的高度误差辅助惩罚”，而不是单独的正向奖励。
+        #
+        # 当前代码库里这个奖励项默认没有在 rewards.scales 中启用；
+        # 通常只有在“主高度奖励太尖锐，训练前期高度误差较大、学习信号不够稳定”时，
+        # 才会考虑把它和 _reward_base_height(...) 一起启用，并且一般只给较小权重。
         return torch.exp(-base_height_error / 0.001 / 10) - 1
 
     def _reward_torques(self):
