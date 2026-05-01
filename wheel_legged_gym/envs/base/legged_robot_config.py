@@ -93,6 +93,17 @@ class LeggedRobotCfg(BaseConfig):
         curriculum_threshold = 0.7
         num_commands = 3  # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 5.0  # time before command are changed[s]
+        # 当 heading_command = True 时：
+        #     环境会先采样一个目标朝向角，存到 self.commands[:, 3]
+        #     每个控制步里，根据机器人当前朝向 heading
+        #     计算“目标朝向角 - 当前朝向角”的误差
+        #     再用一个很简单的比例反馈把这个角度误差换成一个偏航角速度命令
+        #     把这个偏航角速度命令写到 self.commands[:, 1]
+        #     后续观测、奖励、控制逻辑真正使用的是 self.commands[:, 1]
+        # 这样更符合实际应用场景：我们通常会有一个目标朝向，而不是一个直接的偏航角速度命令。机器人需要学会根据朝向误差调整自己的偏航速度，从而达到目标朝向。
+        #
+        # 当 heading_command = False 时：
+        #     环境直接采样一个偏航角速度命令，存到 self.commands[:, 1]，并直接使用这个命令进行控制和奖励计算。
         heading_command = True  # if true: compute ang vel command from heading error
 
         class ranges:
@@ -197,11 +208,13 @@ class LeggedRobotCfg(BaseConfig):
         only_positive_rewards = False  # if true negative total rewards are clipped at zero (avoids early termination problems)
         clip_single_reward = 1
         tracking_sigma = 0.25  # tracking reward = exp(-error^2/sigma)
+        
         soft_dof_pos_limit = (
             0.97  # percentage of urdf limits, values above this limit are penalized
         )
         soft_dof_vel_limit = 1.0
         soft_torque_limit = 1.0
+        # 这个参数完全未被调用，不知道为什么要记录在配置文件中
         base_height_target = 0.18
         max_contact_force = 100.0  # forces above this value are penalized
 

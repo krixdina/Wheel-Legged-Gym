@@ -1949,31 +1949,34 @@ class LeggedRobot(BaseTask):
             # 鼓励机身高度贴近命令高度。误差越小越接近 1。
             base_height_error = torch.square(self.base_height - self.commands[:, 2])
             return torch.exp(-base_height_error / 0.001)
-
+        
+    # self.commands 第二维 4 个分量的实际含义是：
+    #     0: 前向速度命令 lin_vel_x
+    #     1: 实际使用的偏航角速度命令 ang_vel_yaw
+    #     2: 目标机身高度命令 height
+    #     3: 目标朝向角 heading，仅用于在 heading_command=True 时推导出 ang_vel_yaw
     def _reward_base_height_enhance(self):
-        # 这是“机身高度主奖励”的辅助塑形项，而不是一个更强的主奖励。
+        # 这是“机身高度主奖励”的辅助项，而不是一个更强的主奖励。
         # 这里的 enhance 更适合在中文里理解成“增强训练信号的辅助项”：
         # 当机器人离目标高度还比较远时，它能提供一个衰减更慢、更平滑的修正信号，
         # 帮助策略先学会把高度往正确方向调回来；真正负责精确贴近目标高度的，仍是上面的 _reward_base_height(...)。
-
-        # base_height_error 表示“当前机身实际高度”和“当前命令给出的目标高度”之间的平方误差。
-        # 误差越小，说明机器人当前高度越接近想要的高度；误差越大，说明偏差越明显。
         base_height_error = torch.square(self.base_height - self.commands[:, 2])
 
         # 这里使用指数衰减来构造一个平滑的辅助惩罚项：
-        # 1. 分母比主高度奖励更大，因此误差变大时衰减得更慢，能在较大误差范围内保留训练信号；
-        # 2. 末尾减去 1 之后，返回值范围从原来的 (0, 1] 变成 (-1, 0]：
+        # 1. 分母比主高度奖励更大，因此误差变大时衰减得更慢，能在较大误差范围内保留训练信号，因为主奖励在误差较大时很快会衰减为 0 ；
+        # 2. 末尾减去 1 之后，返回值范围从原来的 (0, 1] 变成 (-1, 0]:
         #    - 当高度完全贴近目标时，返回 0，表示这项辅助惩罚可以自然退出；
         #    - 当高度偏差较大时，返回接近 -1，表示持续给出负反馈。
         # 所以它的角色更像“平滑的高度误差辅助惩罚”，而不是单独的正向奖励。
         #
-        # 当前代码库里这个奖励项默认没有在 rewards.scales 中启用；
-        # 通常只有在“主高度奖励太尖锐，训练前期高度误差较大、学习信号不够稳定”时，
+        # 通常只有在“训练前期高度误差较大、主高度奖励的学习信号不够稳定”时，
         # 才会考虑把它和 _reward_base_height(...) 一起启用，并且一般只给较小权重。
         return torch.exp(-base_height_error / 0.001 / 10) - 1
 
     def _reward_torques(self):
         # Penalize torques
+        # 奖励计算公式：所有关节力矩平方和
+        # 意义：惩罚用力过猛，
         return torch.sum(torch.square(self.torques), dim=1)
 
     def _reward_power(self):
@@ -1982,6 +1985,7 @@ class LeggedRobot(BaseTask):
 
     def _reward_dof_vel(self):
         # Penalize dof velocities
+        # 只统计腿部关节 0,1,3,4 的速度平方和，不含轮速。抑制腿部关节摆动过快。
         return torch.sum(torch.square(self.dof_vel[:, :2]), dim=1) + torch.sum(
             torch.square(self.dof_vel[:, 3:5]), dim=1
         )
@@ -1992,10 +1996,16 @@ class LeggedRobot(BaseTask):
 
     def _reward_action_rate(self):
         # Penalize changes in actions
+        # 惩罚相邻控制步动作跳变过大。
+        # last_actions 的第 2 维：长度为 2 的时间历史
+        #   [..., 0] 表示“上一个控制步”的动作
+        #   [..., 1] 表示“上上个控制步”的动作
         return torch.sum(torch.square(self.last_actions[:, :, 0] - self.actions), dim=1)
 
     def _reward_action_smooth(self):
         # Penalize changes in actions
+        # 通过对动作进行二阶差分来惩罚"动作变化的速度"，鼓励动作变化更平滑。
+        # 上一项 _reward_action_rate(...) 惩罚的是“动作变化的幅度”
         return torch.sum(
             torch.square(
                 self.actions[:, :2]
@@ -2057,10 +2067,7 @@ class LeggedRobot(BaseTask):
         out_of_limits += (self.dof_pos[:, 3:5] - self.dof_pos_limits[3:5, 1]).clip(
             min=0.0
         )
-        # 经过上面的累计后，out_of_limits 中每个元素都表示某个被监控关节的越界量，
-        # 没有越界就是 0，越界越多值越大。
-        # 最后沿着关节这一维求和，得到每个并行环境里“所有被监控腿部关节总共越界了多少”，
-        # 作为这一奖励项在当前控制步的原始惩罚值。
+        
         return torch.sum(out_of_limits, dim=1)
 
     def _reward_dof_vel_limits(self):
@@ -2105,17 +2112,26 @@ class LeggedRobot(BaseTask):
         return torch.exp(-ang_vel_error / self.cfg.rewards.tracking_sigma / 10) - 1
 
     def _reward_tracking_lin_vel_pbrs(self):
+        # 这是“和上一个控制步相比，前向速度跟踪是否变得更好了”的增量奖励。
+        # 当前步的主跟踪奖励由 _reward_tracking_lin_vel(...) 计算得到，
+        # self.rwd_linVelTrackPrev 保存的是本控制步开始前记录下来的上一控制步中的速度跟踪奖励，
+        # 二者相减后得到的就是“这一小步让跟踪质量改善了多少”。
+        #
+        # 前面的 ~self.reset_buf 是“未发生重置”的掩码：
+        # - 某个并行环境如果这一控制步结束后需要 reset，这里就把该环境的增量奖励清零；
+        # - 这样做是为了避免把 reset 前后状态突然跳变带来的数值变化，
+        #   误当成策略真的让跟踪性能变好了或变差了。
         delta_phi = ~self.reset_buf * (
             self._reward_tracking_lin_vel() - self.rwd_linVelTrackPrev
         )
-        # return lin_vel_error
+
         return delta_phi
 
     def _reward_tracking_ang_vel_pbrs(self):
+        # 奖励类型同上
         delta_phi = ~self.reset_buf * (
             self._reward_tracking_ang_vel() - self.rwd_angVelTrackPrev
         )
-        # return ang_vel_error
         return delta_phi
 
     def _reward_stumble(self):
@@ -2134,6 +2150,7 @@ class LeggedRobot(BaseTask):
 
     def _reward_nominal_state(self):
         # return torch.square(self.theta0[:, 0] - self.theta0[:, 1])
+        # 惩罚左右虚拟腿摆角不相等，鼓励机器人保持对称站立姿态。
         if self.reward_scales["nominal_state"] < 0:
             return torch.square(self.theta0[:, 0] - self.theta0[:, 1])
         else:
