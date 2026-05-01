@@ -24,29 +24,17 @@ class WheelLeggedVMCFYTCfg(WheelLeggedFYTCfg):
         randomize_action_delay = False
         
     class control(WheelLeggedFYTCfg.control):
-        # action_scale_theta = 0.5
-        # action_scale_l0 = 0.1
-        # action_scale_vel = 10.0
-
-        # l0_offset = 0.24
-        # feedforward_force = 40.0  # [N]
-
-        # kp_theta = 50.0  # [N*m/rad]
-        # kd_theta = 3.0  # [N*m*s/rad]
-        # kp_l0 = 900.0  # [N/m]
-        # kd_l0 = 20.0  # [N*s/m]
-
-        action_scale_theta = 3.0
-        action_scale_l0 = 0.05
+        action_scale_theta = 0.8
+        action_scale_l0 = 0.08
         action_scale_vel = 10.0
 
         l0_offset = 0.24
-        feedforward_force = 70.0  # [N]
+        feedforward_force = 85.0  # [N]
 
-        kp_theta = 800.0  # [N*m/rad]
-        kd_theta = 10.0  # [N*m*s/rad]
-        kp_l0 = 70.0  # [N/m]
-        kd_l0 = 5.0  # [N*s/m]
+        kp_theta = 80.0  # [N*m/rad]
+        kd_theta = 4.0  # [N*m*s/rad]
+        kp_l0 = 1000.0  # [N/m]
+        kd_l0 = 25.0  # [N*s/m]
 
         # PD Drive parameters:
         stiffness = {"thigh": 0.0, "leg": 0.0, "wheel": 0}  # [N*m/rad]

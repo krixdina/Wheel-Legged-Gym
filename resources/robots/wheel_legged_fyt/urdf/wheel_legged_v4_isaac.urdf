@@ -86,7 +86,7 @@
   </link>
   <joint
     name="left_thigh_joint"
-    type="continuous">
+    type="revolute">
     <origin
       xyz="0 0.162500000000001 0.115879159638825"
       rpy="-1.5707963267949 0 0" />
@@ -258,7 +258,7 @@
   </link>
   <joint
     name="right_thigh_joint"
-    type="continuous">
+    type="revolute">
     <origin
       xyz="0 -0.1625 0.11588"
       rpy="1.5708 0 0" />

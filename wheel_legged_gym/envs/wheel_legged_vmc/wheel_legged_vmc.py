@@ -288,6 +288,7 @@ class LeggedRobotVMC(LeggedRobot):
         # reset robot states
         self._reset_dofs(env_ids)
         self._reset_root_states(env_ids)
+        self.leg_post_physics_step()
 
         self._resample_commands(env_ids)
 
@@ -606,14 +607,14 @@ class LeggedRobotVMC(LeggedRobot):
         # 机体角速度、重力方向、运动命令、虚拟腿摆角和腿长、轮关节状态以及上一时刻策略动作。
         noise_vec[:3] = noise_scales.ang_vel * noise_level * self.obs_scales.ang_vel
         noise_vec[3:6] = noise_scales.gravity * noise_level
-        noise_vec[6:8] = 0.0  # commands
-        noise_vec[8:10] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
-        noise_vec[10:12] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
-        noise_vec[12:14] = noise_scales.l0 * noise_level * self.obs_scales.l0
-        noise_vec[14:16] = noise_scales.l0_dot * noise_level * self.obs_scales.l0_dot
-        noise_vec[16:18] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
-        noise_vec[18:20] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
-        noise_vec[20:26] = 0.0  # previous actions
+        noise_vec[6:9] = 0.0  # commands
+        noise_vec[9:11] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
+        noise_vec[11:13] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
+        noise_vec[13:15] = noise_scales.l0 * noise_level * self.obs_scales.l0
+        noise_vec[15:17] = noise_scales.l0_dot * noise_level * self.obs_scales.l0_dot
+        noise_vec[17:19] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
+        noise_vec[19:21] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
+        noise_vec[21:27] = 0.0  # previous actions
         # 如果当前地形配置启用了高度测量观测，则为局部地形高度采样部分也设置噪声幅值；
         # 这些高度采样值用于让策略感知机器人周围地形起伏。
         if self.cfg.terrain.measure_heights:
