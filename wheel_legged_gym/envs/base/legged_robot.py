@@ -446,12 +446,36 @@ class LeggedRobot(BaseTask):
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
 
+    # 作用：
+    # 这个函数负责在每个环境控制步结束时，汇总当前所有已启用的奖励项，
+    # 生成并行环境这一时刻的总奖励，并把各奖励项在当前回合内分别累计起来。
+    # 上游由仿真后处理流程调用，下游则通过 self.rew_buf 把奖励返回给强化学习训练器，
+    # 用于 PPO 采样与更新。
+    #
+    # 输入：
+    # 无显式参数；函数主要读取当前环境对象里的几类运行时状态：
+    # self.reward_functions 表示已经根据配置筛选并注册好的奖励函数列表，
+    # 其中每个元素都对应一个具体的奖励公式；
+    # self.reward_scales 表示每个奖励项的权重，数值已经在初始化阶段按一个环境步对应的真实时长做过缩放；
+    # self.reward_names 表示奖励函数列表中每一项对应的奖励名字；
+    # 另外还会读取 self.cfg.rewards 里的裁剪和总奖励后处理配置。
+    #
+    # 输出：
+    # 这个函数没有显式返回值；它通过修改当前环境对象的内部状态产生效果。
+    # self.rew_buf 会被写成“每个并行环境在当前这一步的总奖励”；
+    # self.episode_sums 会继续累计“每个并行环境在当前回合内各奖励项的累计值”，
+    # 供回合结束时记录日志和课程学习逻辑使用。
     def compute_reward(self):
         """Compute rewards
         Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
         adds each terms to the episode sums and to the total reward
         """
+        # 先清空当前控制步的总奖励缓存，准备重新累加本步所有已启用的奖励项。
         self.rew_buf[:] = 0.0
+        # 按初始化阶段整理好的顺序，逐项计算奖励：
+        # 先调用具体奖励公式得到当前状态下的原始奖励值，
+        # 再乘上该奖励项的权重，并限制单项奖励在当前一步内的最大影响范围，
+        # 最后同时写入“本步总奖励”和“当前回合分项累计奖励”。
         for i in range(len(self.reward_functions)):
             name = self.reward_names[i]
             rew = self.reward_functions[i]() * self.reward_scales[name]
@@ -462,9 +486,14 @@ class LeggedRobot(BaseTask):
             )
             self.rew_buf += rew
             self.episode_sums[name] += rew
+        # 如果配置要求总奖励不能为负，就在所有普通奖励项累加完成后，
+        # 统一把每个并行环境当前这一步的总奖励下限截到 0。
         if self.cfg.rewards.only_positive_rewards:
             self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.0)
         # add termination reward after clipping
+        # 终止奖励单独放在最后处理：
+        # 它不会参与前面的普通奖励逐项裁剪流程，而是在总奖励基本形成后，
+        # 根据“是否真正失败终止而不是单纯超时”补上额外奖惩。
         if "termination" in self.reward_scales:
             rew = self._reward_termination() * self.reward_scales["termination"]
             self.rew_buf += rew
