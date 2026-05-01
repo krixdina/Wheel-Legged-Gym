@@ -2031,18 +2031,36 @@ class LeggedRobot(BaseTask):
 
     def _reward_dof_pos_limits(self):
         # Penalize dof positions too close to the limit
+        # 这里先处理左腿前两个关节低于下限的情况。
+        # self.dof_pos[:, :2] 表示所有并行环境里左腿前两个关节当前的角度，
+        # self.dof_pos_limits[:2, 0] 表示这两个关节各自允许的最小角度。
+        # 先做“当前角度 - 下限”，如果结果是负数，说明已经低于下限；
+        # clip(max=0.0) 会把没有越界的正数截成 0，只保留“低于下限”的负值；
+        # 最前面的负号再把这个负值变成正的越界量，表示“超出了多少”。
         out_of_limits = -(self.dof_pos[:, :2] - self.dof_pos_limits[:2, 0]).clip(
             max=0.0
         )  # lower limit
+        # 这里处理左腿前两个关节高于上限的情况。
+        # self.dof_pos_limits[:2, 1] 表示这两个关节各自允许的最大角度。
+        # 做“当前角度 - 上限”后，只有超过上限时结果才是正数；
+        # clip(min=0.0) 会把没有越界的负数截成 0，于是保留下来的就是“高于上限超了多少”。
         out_of_limits += (self.dof_pos[:, :2] - self.dof_pos_limits[:2, 1]).clip(
             min=0.0
         )
+        # 下面两段和上面完全同理，只是对象换成右腿前两个关节。
+        # self.dof_pos[:, 3:5] 表示所有并行环境里右腿前两个关节当前的角度，
+        # self.dof_pos_limits[3:5, 0] 和 self.dof_pos_limits[3:5, 1]
+        # 分别表示这两个关节各自允许的最小角度和最大角度。
         out_of_limits += -(self.dof_pos[:, 3:5] - self.dof_pos_limits[3:5, 0]).clip(
             max=0.0
         )  # lower limit
         out_of_limits += (self.dof_pos[:, 3:5] - self.dof_pos_limits[3:5, 1]).clip(
             min=0.0
         )
+        # 经过上面的累计后，out_of_limits 中每个元素都表示某个被监控关节的越界量，
+        # 没有越界就是 0，越界越多值越大。
+        # 最后沿着关节这一维求和，得到每个并行环境里“所有被监控腿部关节总共越界了多少”，
+        # 作为这一奖励项在当前控制步的原始惩罚值。
         return torch.sum(out_of_limits, dim=1)
 
     def _reward_dof_vel_limits(self):
