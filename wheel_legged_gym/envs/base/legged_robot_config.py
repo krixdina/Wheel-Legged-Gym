@@ -233,6 +233,7 @@ class LeggedRobotCfg(BaseConfig):
 
     class noise:
         add_noise = True
+        # 直接乘在每一个 noise_scales 上的总噪声强度倍率系数，方便在训练过程中调整整体噪声水平。
         noise_level = 1.0  # scales other values
 
         class noise_scales:
