@@ -133,7 +133,7 @@ class PPO:
         self.transition.critic_observations = critic_obs.clone()
         return self.transition.actions
 
-    # 作用：在环境完成一步交互后，把这一步动作得到的奖励、结束标记和下一时刻观测补全到临时转移对象中，
+    # 作用：在环境完成一步交互后，把这一步动作得到的奖励、结束标记和下一时刻观测补全到 transitions 对象中，
     #      处理因时间上限截断带来的 bootstrap 奖励修正，然后把完整转移写入 rollout 缓冲区，供后续计算 returns 和 PPO 更新使用。
     # 输入：rewards 表示环境在执行当前动作后返回的即时奖励；dones 表示并行环境中哪些轨迹在这一步结束；
     #      infos 表示环境附带返回的辅助信息字典，其中可能包含是否因时间上限被截断的标记；

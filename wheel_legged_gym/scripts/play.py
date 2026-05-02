@@ -83,6 +83,7 @@ def play(args):
             "exported",
             "policies",
         )
+        # 这里导出的是已经从 checkpoint 恢复出来的 actor_critic 网络
         export_policy_as_jit(ppo_runner.alg.actor_critic, path)
         print("Exported policy as jit script to: ", path)
 
@@ -104,20 +105,33 @@ def play(args):
     vel_cmd = torch.zeros(env.num_envs, device=env.device)
 
     for i in range(1000 * int(env.max_episode_length)):
+        # 如果策略网络带有时序结构，就同时使用当前观测和历史观测，
+        # 并取回网络内部估计出的隐变量；否则只基于当前观测直接输出动作。
         if ppo_runner.alg.actor_critic.is_sequence:
             actions, latent = policy(obs, obs_history)
         else:
             actions = policy(obs.detach())
 
+        # 分别设置前向速度、机身高度和偏航角速度目标。
         env.commands[:, 0] = 2.5
         env.commands[:, 2] = 0.18  # + 0.07 * np.sin(i * 0.01)
         env.commands[:, 3] = 0
 
+        # 先生成一个分阶段上升的参考速度，再根据期望前向速度与实际前向速度的误差微调控制指令。
         if CoM_offset_compensate:
             if i > 200 and i < 600:
+                # 200 到 600 步之间，速度目标从 0 平滑爬升到 2.5
                 vel_cmd[:] = 2.5 * np.clip((i - 200) * 0.05, 0, 1)
             else:
                 vel_cmd[:] = 0
+            # vel_err_intergral 表示“速度误差的积分补偿量”：
+            # 这里使用离散形式的积分近似，也就是每一步都按“当前误差 * 时间步长 env.dt”累加。
+            # 因此它不是只看当前这一拍误差，而是在持续记住过去一段时间里“总是偏快还是总是偏慢”。
+            #
+            # 最后一项 ((vel_cmd - env.base_lin_vel[:, 0]).abs() < 0.5) 是一个按环境分别生效的 0/1 门控：
+            # 当“目标前向速度与实际前向速度”的误差绝对值小于 0.5 时，该项为 1，允许继续积分微调；
+            # 当误差过大时，该项为 0，本步不再累加积分。
+            # 这样做的目的，是避免机器人还远没跟上目标时就过度累积积分量，减小积分饱和和补偿过猛的风险。
             vel_err_intergral += (
                 (vel_cmd - env.base_lin_vel[:, 0])
                 * env.dt
@@ -127,6 +141,7 @@ def play(args):
             env.commands[:, 0] = vel_cmd + vel_err_intergral
 
         obs, _, rews, dones, infos, obs_history = env.step(actions)
+        # 如果开启录帧，就定期把当前查看器画面保存成图片，便于后续合成视频或逐帧分析。
         if RECORD_FRAMES:
             if i % 2:
                 filename = os.path.join(
@@ -139,6 +154,7 @@ def play(args):
                 )
                 env.gym.write_viewer_image_to_file(env.viewer, filename)
                 img_idx += 1
+        # 如果开启相机跟随，就把观察视角移动到指定机器人附近，使画面持续跟踪目标机器人。
         if MOVE_CAMERA:
             camera_offset = np.array(env_cfg.viewer.pos)
             target_position = np.array(
@@ -147,6 +163,12 @@ def play(args):
             camera_position = target_position + camera_offset
             env.set_camera(camera_position, target_position)
 
+        # 在一段时间内记录单台机器人和单个关节的状态，
+        # 这里的 logger.log_states(...) 不是立刻把内容打印出来，
+        # 而是把“当前这一仿真步的字段名和数值”追加保存到 Logger 内部的 state_log 中。
+        # 因此同一个字段在很多步里反复记录后，会形成一条按 dt 时间排列的历史序列，
+        # 如 state_log["dof_pos"] = [第1步的值, 第2步的值, 第3步的值, ...]
+        # 后续如果调用 logger.plot_states()，横轴通常就是，纵轴就是这里记录的对应物理量。
         if i < stop_state_log:
             logger.log_states(
                 {
@@ -174,6 +196,8 @@ def play(args):
                 logger.log_states({"command_x": vel_cmd[robot_index].item()})
             else:
                 logger.log_states({"command_x": env.commands[robot_index, 0].item()})
+            # 如果策略返回了隐变量，就额外记录网络估计出来的机身线速度；
+            # 当隐变量维度更高且观测噪声开启时，还会对比“观测值”和“估计值”的差异。
             if latent is not None:
                 logger.log_states(
                     {
@@ -215,10 +239,16 @@ def play(args):
         elif i == stop_state_log:
             # logger.plot_states()
             pass
+        # 在若干回合结束后累计每回合奖励，并在设定步数达到阈值时打印平均奖励统计。
         if 0 < i < stop_rew_log:
+            # infos["episode"] 只有在这一仿真步里有并行环境的 episode 刚好结束时才会有有效统计；
+            # 它携带的是这一批刚结束回合的奖励分项信息
             if infos["episode"]:
+                # 因此这里求和得到的是“这一仿真步总共结束了多少个 episode”，
                 num_episodes = torch.sum(env.reset_buf).item()
                 if num_episodes > 0:
+                    # log_rewards(...) 会把这一批 episode 的奖励统计按 num_episodes 做累计，
+                    # 后续 print_rewards() 再用“累计奖励总和 / 累计结束的 episode 总数”得到平均奖励。
                     logger.log_rewards(infos["episode"], num_episodes)
         elif i == stop_rew_log:
             logger.print_rewards()

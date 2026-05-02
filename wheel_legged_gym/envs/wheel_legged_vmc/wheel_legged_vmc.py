@@ -288,6 +288,14 @@ class LeggedRobotVMC(LeggedRobot):
         # reset robot states
         self._reset_dofs(env_ids)
         self._reset_root_states(env_ids)
+        # 这里必须在 reset 后立刻同步一次 VMC 状态。原因是：
+        # 上一个 step 中，这些环境虽然先到达了执行动作后的终止状态，
+        # 但一旦进入 reset_idx(...)，原始关节和机身状态就已经被改写成下一回合的起点。
+        # 后面 compute_observations(...) 返回给 runner 的也将是“reset 后的新 obs”，
+        # 而不是终止时那个 s' 的 obs。
+        # 如果这里不马上重算，theta0、L0、theta0_dot、L0_dot 这些策略真正使用的虚拟腿状态
+        # 仍可能停留在上一回合终止时刻；这样就会出现“原始关节已经 reset，但 VMC 观测还是旧值”的错位，
+        # 并进一步污染新回合第一帧 obs 以及下面要用它铺满的 obs_history。
         self.leg_post_physics_step()
 
         self._resample_commands(env_ids)
@@ -359,31 +367,39 @@ class LeggedRobotVMC(LeggedRobot):
     # 父类普通观测会直接包含全部关节的位置误差 (self.dof_pos - self.default_dof_pos)
     # 和全部关节速度 self.dof_vel，也就是让策略网络直接看到 6 个自由度的原始关节状态。
     #
-    # 当前 VMC 子类把腿部原始关节状态替换成虚拟腿状态：
-    # self.theta0 表示左右虚拟腿相对机体竖直方向的摆角；
-    # self.theta0_dot 表示左右虚拟腿摆角变化速度；
-    # self.L0 表示左右虚拟腿长度；
-    # self.L0_dot 表示左右虚拟腿长度变化速度。
-    # 这样 actor 学到的是“虚拟腿层”的控制输入，而不是直接基于腿部关节角做端到端控制。
+    # 当前 VMC 子类把腿部原始关节状态替换成虚拟腿状态：self.theta0、self.theta0_dot、self.L0、self.L0_dot。
     #
     # 轮子仍然保留原始关节状态：self.dof_pos[:, [2, 5]] 表示左右轮关节位置，
     # self.dof_vel[:, [2, 5]] 表示左右轮关节速度，因为 VMC 只替换腿部几何控制，轮速仍直接参与底层控制。
+    #
+    # 本函数的返回值会写入 self.obs_buf , step() 会将 self.obs_buf 作为当前时刻的普通观测返回给算法
+    # 表示在当前观测 s 采取动作 a 后，最终获得的下一步观测 s'。
     def compute_proprioception_observations(self):
         # note that observation noise need to modified accordingly !!!
         obs_buf = torch.cat(
             (
                 # self.base_lin_vel * self.obs_scales.lin_vel,
+                # 先放入机体角速度和重力方向。
+                # 这两部分共同描述机器人机身当前的旋转状态与倾斜方向，
+                # 是策略判断自己是否稳定、是否在前倾或侧倾的基础信息。
                 self.base_ang_vel * self.obs_scales.ang_vel,
                 self.projected_gravity,
+                # 再加入当前采样到的运动命令。
+                # 这里的命令是策略本步需要跟踪的目标，
+                # 例如前进速度、转向速度和高度相关目标。
                 self.commands[:, :3] * self.commands_scale,
                 # (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
                 # self.dof_vel * self.obs_scales.dof_vel,
+                # 腿部状态不再直接使用原始关节角，而是使用 VMC 语义下的虚拟腿状态。
                 self.theta0 * self.obs_scales.dof_pos,
                 self.theta0_dot * self.obs_scales.dof_vel,
                 self.L0 * self.obs_scales.l0,
                 self.L0_dot * self.obs_scales.l0_dot,
                 self.dof_pos[:, [2, 5]] * self.obs_scales.dof_pos,
                 self.dof_vel[:, [2, 5]] * self.obs_scales.dof_vel,
+                # 最后拼接当前时刻的动作缓存，
+                # 给策略提供“上一拍自己刚输出了什么控制量”的上下文，
+                # 有助于抑制抖动并学习更平滑的控制。
                 self.actions,
             ),
             dim=-1,
