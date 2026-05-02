@@ -28,7 +28,10 @@ class WheelLeggedFYTCfg(LeggedRobotCfg):
 
     class commands(LeggedRobotCfg.commands):
         class ranges(LeggedRobotCfg.commands.ranges):
+            lin_vel_x = [-1.0, 1.0]  # min max [m/s]
+            ang_vel_yaw = [-3.14, 3.14]  # min max [rad/s]
             height = [0.15, 0.32]
+            heading = [-3.14, 3.14]
 
     class asset(LeggedRobotCfg.asset):
         file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/resources/robots/wheel_legged_fyt/urdf/wheel_legged_v4_isaac.urdf"
