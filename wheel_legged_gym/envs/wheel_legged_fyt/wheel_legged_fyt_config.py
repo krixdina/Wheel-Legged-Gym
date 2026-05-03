@@ -30,7 +30,7 @@ class WheelLeggedFYTCfg(LeggedRobotCfg):
         class ranges(LeggedRobotCfg.commands.ranges):
             lin_vel_x = [-1.0, 1.0]  # min max [m/s]
             ang_vel_yaw = [-3.14, 3.14]  # min max [rad/s]
-            height = [0.15, 0.32]
+            height = [0.1, 0.2]
             heading = [-3.14, 3.14]
 
     class asset(LeggedRobotCfg.asset):

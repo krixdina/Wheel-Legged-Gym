@@ -63,6 +63,11 @@ def play(args):
     env_cfg.domain_rand.randomize_motor_torque = False
     env_cfg.domain_rand.randomize_default_dof_pos = False
     env_cfg.domain_rand.randomize_action_delay = False
+    env_cfg.control.feedforward_force = 80.0
+    env_cfg.control.kp_theta = 80.0
+    env_cfg.control.kd_theta = 4.0
+    env_cfg.control.kp_l0 = 700.0
+    env_cfg.control.kd_l0 = 70.0
 
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
@@ -114,7 +119,7 @@ def play(args):
 
         # 分别设置前向速度、机身高度和偏航角速度目标。
         env.commands[:, 0] = 2.5
-        env.commands[:, 2] = 0.18  # + 0.07 * np.sin(i * 0.01)
+        env.commands[:, 2] = 0.15  # + 0.07 * np.sin(i * 0.01)
         env.commands[:, 3] = 0
 
         # 先生成一个分阶段上升的参考速度，再根据期望前向速度与实际前向速度的误差微调控制指令。

@@ -28,13 +28,13 @@ class WheelLeggedVMCFYTCfg(WheelLeggedFYTCfg):
         action_scale_l0 = 0.08
         action_scale_vel = 10.0
 
-        l0_offset = 0.24
-        feedforward_force = 85.0  # [N]
+        l0_offset = 0.2
+        feedforward_force = 70.0  # [N]
 
         kp_theta = 80.0  # [N*m/rad]
         kd_theta = 4.0  # [N*m*s/rad]
         kp_l0 = 1000.0  # [N/m]
-        kd_l0 = 25.0  # [N*s/m]
+        kd_l0 = 60.0  # [N*s/m]
 
         # PD Drive parameters:
         stiffness = {"thigh": 0.0, "leg": 0.0, "wheel": 0}  # [N*m/rad]
@@ -42,7 +42,7 @@ class WheelLeggedVMCFYTCfg(WheelLeggedFYTCfg):
 
     class normalization(WheelLeggedFYTCfg.normalization):
         class obs_scales(WheelLeggedFYTCfg.normalization.obs_scales):
-            l0 = 5.0
+            l0 = 4.5
             l0_dot = 0.25
 
     class noise(WheelLeggedFYTCfg.noise):
