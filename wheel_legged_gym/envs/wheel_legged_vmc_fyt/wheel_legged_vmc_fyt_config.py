@@ -24,8 +24,8 @@ class WheelLeggedVMCFYTCfg(WheelLeggedFYTCfg):
         randomize_action_delay = False
         
     class control(WheelLeggedFYTCfg.control):
-        action_scale_theta = 0.8
-        action_scale_l0 = 0.08
+        action_scale_theta = 0.6
+        action_scale_l0 = 0.1
         action_scale_vel = 10.0
 
         l0_offset = 0.2

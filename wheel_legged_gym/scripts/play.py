@@ -118,7 +118,7 @@ def play(args):
             actions = policy(obs.detach())
 
         # 分别设置前向速度、机身高度和偏航角速度目标。
-        env.commands[:, 0] = 2.5
+        env.commands[:, 0] = 1.5
         env.commands[:, 2] = 0.15  # + 0.07 * np.sin(i * 0.01)
         env.commands[:, 3] = 0
 
