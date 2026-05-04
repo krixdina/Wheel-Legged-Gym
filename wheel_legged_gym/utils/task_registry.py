@@ -28,6 +28,7 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
+import inspect
 import os
 from datetime import datetime
 from typing import Tuple
@@ -87,34 +88,39 @@ class TaskRegistry:
         env_cfg.seed = train_cfg.seed
         return env_cfg, train_cfg
 
+    def _collect_python_sources(self, cls):
+        source_files = []
+        for base_cls in cls.mro():
+            if base_cls is object:
+                continue
+            source_path = inspect.getsourcefile(base_cls)
+            if source_path is None:
+                continue
+            source_path = os.path.abspath(source_path)
+            if not source_path.startswith(WHEEL_LEGGED_GYM_ROOT_DIR):
+                continue
+            if source_path not in source_files:
+                source_files.append(source_path)
+        return source_files
+
     def save_cfgs(self, name) -> Tuple[LeggedRobotCfg, LeggedRobotCfgPPO]:
         os.mkdir(self.log_dir)
+        env_cfg, train_cfg = self.get_cfgs(name)
+        task_class = self.get_task_class(name)
 
-        save_items = [
-            os.path.join(
-                self.log_dir,
-                WHEEL_LEGGED_GYM_ENVS_DIR + "/base/legged_robot.py",
-            ),
-            os.path.join(
-                self.log_dir,
-                WHEEL_LEGGED_GYM_ENVS_DIR + "/base/legged_robot_config.py",
-            ),
-            os.path.join(
-                self.log_dir,
-                WHEEL_LEGGED_GYM_ENVS_DIR
-                + "/{}/".format(name)
-                + "{}_config.py".format(name),
-            ),
-        ]
-        py_root = os.path.join(
-            WHEEL_LEGGED_GYM_ENVS_DIR + "/{}/".format(name) + "{}.py".format(name),
-        )
-        if os.path.exists(py_root):
-            save_items.append(os.path.join(self.log_dir, py_root))
-        if save_items is not None:
-            for save_item in save_items:
-                base_file_name = ntpath.basename(save_item)
-                copyfile(save_item, self.log_dir + "/" + base_file_name)
+        save_items = []
+        save_items.extend(self._collect_python_sources(task_class))
+        save_items.extend(self._collect_python_sources(type(env_cfg)))
+        save_items.extend(self._collect_python_sources(type(train_cfg)))
+
+        unique_save_items = []
+        for save_item in save_items:
+            if save_item not in unique_save_items:
+                unique_save_items.append(save_item)
+
+        for save_item in unique_save_items:
+            base_file_name = ntpath.basename(save_item)
+            copyfile(save_item, os.path.join(self.log_dir, base_file_name))
 
     def make_env(self, name, args=None, env_cfg=None) -> Tuple[VecEnv, LeggedRobotCfg]:
         """Creates an environment either from a registered namme or from the provided config file.
