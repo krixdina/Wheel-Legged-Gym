@@ -10,35 +10,35 @@ class WheelLeggedVMCFYTCfg(WheelLeggedFYTCfg):
             WheelLeggedFYTCfg.env.num_observations + 7 * 11 + 3 + 6 * 7 + 3 + 3
         )
 
-    class domain_rand(WheelLeggedFYTCfg.domain_rand):
-        randomize_friction = False
-        randomize_restitution = False
-        randomize_base_mass = False
-        randomize_inertia = False
-        randomize_base_com = False
-        push_robots = False
-        randomize_Kp = False
-        randomize_Kd = False
-        randomize_motor_torque = False
-        randomize_default_dof_pos = False
-        randomize_action_delay = False
+    # class domain_rand(WheelLeggedFYTCfg.domain_rand):
+    #     randomize_friction = False
+    #     randomize_restitution = False
+    #     randomize_base_mass = False
+    #     randomize_inertia = False
+    #     randomize_base_com = False
+    #     push_robots = False
+    #     randomize_Kp = False
+    #     randomize_Kd = False
+    #     randomize_motor_torque = False
+    #     randomize_default_dof_pos = False
+    #     randomize_action_delay = False
         
     class control(WheelLeggedFYTCfg.control):
         action_scale_theta = 0.6
         action_scale_l0 = 0.1
-        action_scale_vel = 10.0
+        action_scale_vel = 6.0
 
-        l0_offset = 0.2
-        feedforward_force = 70.0  # [N]
+        l0_offset = 0.19
+        feedforward_force = 80.0  # [N]
 
         kp_theta = 80.0  # [N*m/rad]
         kd_theta = 4.0  # [N*m*s/rad]
-        kp_l0 = 1000.0  # [N/m]
-        kd_l0 = 60.0  # [N*s/m]
+        kp_l0 = 900.0  # [N/m]
+        kd_l0 = 45.0  # [N*s/m]
 
         # PD Drive parameters:
         stiffness = {"thigh": 0.0, "leg": 0.0, "wheel": 0}  # [N*m/rad]
-        damping = {"thigh": 0.0, "leg": 0.0, "wheel": 0.5}  # [N*m*s/rad]
+        damping = {"thigh": 0.0, "leg": 0.0, "wheel": 0.25}  # [N*m*s/rad]
 
     class normalization(WheelLeggedFYTCfg.normalization):
         class obs_scales(WheelLeggedFYTCfg.normalization.obs_scales):

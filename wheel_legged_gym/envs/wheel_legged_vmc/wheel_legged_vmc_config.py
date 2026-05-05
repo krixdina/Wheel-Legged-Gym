@@ -40,18 +40,18 @@ class WheelLeggedVMCCfg(WheelLeggedCfg):
             WheelLeggedCfg.env.num_observations + 7 * 11 + 3 + 6 * 7 + 3 + 3
         )
 
-    class domain_rand(WheelLeggedCfg.domain_rand):
-        randomize_friction = False
-        randomize_restitution = False
-        randomize_base_mass = False
-        randomize_inertia = False
-        randomize_base_com = False
-        push_robots = False
-        randomize_Kp = False
-        randomize_Kd = False
-        randomize_motor_torque = False
-        randomize_default_dof_pos = False
-        randomize_action_delay = False
+    # class domain_rand(WheelLeggedCfg.domain_rand):
+    #     randomize_friction = False
+    #     randomize_restitution = False
+    #     randomize_base_mass = False
+    #     randomize_inertia = False
+    #     randomize_base_com = False
+    #     push_robots = False
+    #     randomize_Kp = False
+    #     randomize_Kd = False
+    #     randomize_motor_torque = False
+    #     randomize_default_dof_pos = False
+    #     randomize_action_delay = False
 
     class control(WheelLeggedCfg.control):
         action_scale_theta = 0.5
