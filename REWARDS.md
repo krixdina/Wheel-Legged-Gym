@@ -257,3 +257,9 @@
 3. `base_height` 当前不是使用 `base_height_target`，而是直接跟踪 `self.commands[:, 2]` 对应的高度命令，所以 `rewards.base_height_target` 现在是未使用参数。
 4. `soft_dof_vel_limit`、`soft_torque_limit`、`max_contact_force` 这些参数虽然已经实现，但因为对应奖励项没有启用，所以当前训练中不会实际生效。
 5. 如果后续你在某个任务配置里新增 `class rewards(LeggedRobotCfg.rewards)` 覆写 `scales`，那这张表里的“当前是否被调用”就需要按该任务重新核对。
+
+## 6. scripts
+```
+tensorboard --logdir logs/wheel_legged_vmc_fyt --host 0.0.0.0 --port 6007 --reload_interval 5
+python wheel_legged_gym/scripts/train.py --task=wheel_legged_vmc_flat_fyt --num_envs=4096 --headless
+``` 

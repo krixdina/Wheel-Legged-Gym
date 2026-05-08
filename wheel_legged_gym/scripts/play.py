@@ -63,11 +63,11 @@ def play(args):
     env_cfg.domain_rand.randomize_motor_torque = False
     env_cfg.domain_rand.randomize_default_dof_pos = False
     env_cfg.domain_rand.randomize_action_delay = False
-    env_cfg.control.feedforward_force = 80.0
-    env_cfg.control.kp_theta = 80.0
-    env_cfg.control.kd_theta = 4.0
-    env_cfg.control.kp_l0 = 700.0
-    env_cfg.control.kd_l0 = 70.0
+    # env_cfg.control.feedforward_force = 80.0
+    # env_cfg.control.kp_theta = 80.0
+    # env_cfg.control.kd_theta = 4.0
+    # env_cfg.control.kp_l0 = 700.0
+    # env_cfg.control.kd_l0 = 70.0
 
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
@@ -105,7 +105,7 @@ def play(args):
     img_idx = 0
     latent = None
 
-    CoM_offset_compensate = True
+    CoM_offset_compensate = False
     vel_err_intergral = torch.zeros(env.num_envs, device=env.device)
     vel_cmd = torch.zeros(env.num_envs, device=env.device)
 
@@ -118,17 +118,20 @@ def play(args):
             actions = policy(obs.detach())
 
         # 分别设置前向速度、机身高度和偏航角速度目标。
-        env.commands[:, 0] = 1.5
+        env.commands[:, 0] = 2.5
         env.commands[:, 2] = 0.15  # + 0.07 * np.sin(i * 0.01)
         env.commands[:, 3] = 0
 
         # 先生成一个分阶段上升的参考速度，再根据期望前向速度与实际前向速度的误差微调控制指令。
         if CoM_offset_compensate:
-            if i > 200 and i < 600:
+            if i > 2000 and i < 600:
                 # 200 到 600 步之间，速度目标从 0 平滑爬升到 2.5
                 vel_cmd[:] = 2.5 * np.clip((i - 200) * 0.05, 0, 1)
-            else:
+            elif i < 2000 :
                 vel_cmd[:] = 0
+            else: 
+                vel_cmd[:] = 2.5
+                
             # vel_err_intergral 表示“速度误差的积分补偿量”：
             # 这里使用离散形式的积分近似，也就是每一步都按“当前误差 * 时间步长 env.dt”累加。
             # 因此它不是只看当前这一拍误差，而是在持续记住过去一段时间里“总是偏快还是总是偏慢”。
