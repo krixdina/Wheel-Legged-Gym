@@ -277,9 +277,18 @@ class LeggedRobotVMC(LeggedRobot):
         if self.cfg.terrain.curriculum:
             self._update_terrain_curriculum(env_ids)
             if self.cfg.commands.curriculum:
+                # 这里只挑出“因为达到最大回合长度而结束”的环境，作为推进命令课程的参考样本。
+                # 这样可以尽量基于完整 episode 的跟踪表现来判断是否该扩大命令范围，
+                # 而不是把跌倒、越界等提前失败的环境也混进这一步里。
                 time_out_env_ids = self.time_out_buf.nonzero(as_tuple=False).flatten()
                 self.update_command_curriculum(time_out_env_ids)
-        # avoid updating command curriculum at each step since the maximum command is common to all envs
+                
+        # 命令课程学习修改的是 self.command_ranges 这类按 env 存储、但跨 episode 持续生效的状态；
+        # 并行训练里局部 reset 往往很频繁；如果每次只有少量环境结束就立刻触发一次命令课程检查，
+        # 但 update_command_curriculum() 仍会根据奖励判断“是否真的扩展边界”，而此时很可能对应的奖励项并不满足指令难度提升的条件，
+        # 因此这里额外用 common_step_counter 做节流，把“课程检查时机”限制在更稳定的全局时间窗上：
+        # 只有当全局环境步数刚好走满一个 max_episode_length 的整数倍时，
+        # 才允许基于当前这批 reset 环境再做一次命令课程检查/推进。
         if self.cfg.commands.curriculum and (
             self.common_step_counter % self.max_episode_length == 0
         ):

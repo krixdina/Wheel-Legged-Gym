@@ -1667,11 +1667,32 @@ class LeggedRobot(BaseTask):
                 self.envs[0], self.actor_handles[0], termination_contact_names[i]
             )
 
+    # 作用：
+    # 这个函数负责为所有并行环境创建“机器人出生点”的世界坐标，并同步建立与地形课程学习相关的索引状态。
+    # 它在创建仿真环境时被 _create_envs() 调用，得到的出生点会直接决定每台机器人第一次被放到哪里，
+    # 后续 reset_root_states() 也会继续复用这里准备好的环境原点和地形分组结果。
+    #
+    # 输入：
+    # self 表示当前轮腿机器人环境对象，函数内部主要读取：
+    # - self.cfg.terrain：地形配置，用来判断当前是复杂地形还是简单平地，以及课程学习的行列规模；
+    # - self.num_envs：并行环境数量，用来给每个并行机器人分配一个出生点；
+    # - self.terrain：复杂地形构建器对象，其中保存了每块子地形的中心原点坐标。
+    #
+    # 输出：
+    # 这个函数没有显式返回值；它通过修改当前环境对象的内部状态产生效果。
+    # 主要会写入：
+    # - self.env_origins：每个并行环境对应的世界坐标出生点；
+    # - self.custom_origins：标记后续 reset 时是使用地形平台原点，还是使用规则网格原点；
+    # - self.terrain_levels、self.terrain_types：复杂地形模式下每个并行环境所属的难度层和地形类别；
+    # - self.flat_idx 等索引分组：用于课程学习和日志统计时快速定位不同地形类别的环境集合。
     def _get_env_origins(self):
         """Sets environment origins. On rough terrain the origins are defined by the terrain platforms.
         Otherwise create a grid.
         """
         if self.cfg.terrain.mesh_type in ["heightfield", "trimesh"]:
+            # 当前使用的是高度图或三角网格这类复杂地形。
+            # 在这种模式下，每个并行环境的出生点不再是规则网格排列（即在平地任务下，每个网格点都有一个机器人），
+            # 而是直接使用地形生成器为每块子地形预先算好的平台中心位置。
             self.custom_origins = True
             self.env_origins = torch.zeros(
                 self.num_envs, 3, device=self.device, requires_grad=False
@@ -1680,9 +1701,24 @@ class LeggedRobot(BaseTask):
             max_init_level = self.cfg.terrain.max_init_terrain_level
             if not self.cfg.terrain.curriculum:
                 max_init_level = self.cfg.terrain.num_rows - 1
+
+            # self.terrain_levels 表示每个并行环境一开始落在第几层难度。
+            # 如果地形课程学习关闭，就允许从所有难度层里随机初始化；
+            # 如果地形课程学习开启，就只在配置允许的初始最大难度以内采样。
             self.terrain_levels = torch.randint(
                 0, max_init_level + 1, (self.num_envs,), device=self.device
             )
+
+            # self.terrain_types 表示每个并行环境属于哪一列地形类型。
+            # terrain.num_cols 是地形网格的列数，也同样表征了地形类别的数量；
+            # 这里使用并行环境除以地形网格的列数，得到每种地形类型应该分配的并行环境数
+            # 把所有并行环境均匀分配到若干种地形类别上，
+            # 这样同一轮训练里就能同时覆盖平地、坡地、台阶和离散障碍等不同类型。
+            # 这里 torch.div(a, b, rounding_mode="floor") 的语法意思是：
+            #   用张量 a 的每个元素分别去除以 b
+            #   然后对结果做“向下取整”
+            # 如果 num_envs = 40，num_cols = 20，那它会近似变成：
+            # tensor([0, 0, 1, 1, 2, 2, ..., 19, 19])
             self.terrain_types = torch.div(
                 torch.arange(self.num_envs, device=self.device),
                 (self.num_envs / self.cfg.terrain.num_cols),
@@ -1692,6 +1728,9 @@ class LeggedRobot(BaseTask):
             # terrain types: [flat, smooth slope, rough slope, stairs up, stairs down, discrete]
             # terrain types: [0 1 2 3, 4 5 6 7, 8 9 10 11, 12 13, 14 15 16 17, 18 19]
             # terrain_proportions = [0.2, 0.2, 0.2, 0.1, 0.2, 0.1]
+            # 下面这些索引张量保存的是“哪些并行环境当前属于某一种地形类别”。
+            # 注意这里得到的不是地形列编号本身，而是环境编号集合；
+            # * 在这里相当于“按元素逻辑与”
             self.flat_idx = (self.terrain_types < 4).nonzero(as_tuple=False).flatten()
             self.smooth_slope_idx = (
                 ((4 <= self.terrain_types) * (self.terrain_types < 8))
@@ -1718,6 +1757,9 @@ class LeggedRobot(BaseTask):
                 .nonzero(as_tuple=False)
                 .flatten()
             )
+            # 这里把六类地形进一步合并成“基础地形”和“高阶地形”两大组。
+            # 这样做是为了让后续命令课程学习能按地形组别设置不同的速度命令上限：
+            # 相对容易的地形可以放宽得更多，而更难的地形会采用更保守的范围约束。
             self.basic_terrain_idx = torch.cat(
                 (
                     self.flat_idx,
@@ -1729,6 +1771,10 @@ class LeggedRobot(BaseTask):
             self.advanced_terrain_idx = torch.cat(
                 (self.stair_up_idx, self.discrete_idx)
             )
+
+            # self.terrain_origins 保存的是“难度层 x 地形类别”这张二维地图上每个子地形的中心原点。
+            # 下面这一步等价于：对每个并行环境，根据它当前的难度层和地形类别，
+            # 去二维地形地图中取出对应那一块子地形的出生点坐标。
             self.max_terrain_level = self.cfg.terrain.num_rows
             self.terrain_origins = (
                 torch.from_numpy(self.terrain.env_origins)
@@ -1738,6 +1784,8 @@ class LeggedRobot(BaseTask):
             self.env_origins[:] = self.terrain_origins[
                 self.terrain_levels, self.terrain_types
             ]
+            # 这四个边界值描述的是整张复杂地形大地图在世界坐标中的有效范围。
+            # 后续终止判定会用它们检查机器人是否已经跑到地图边缘之外。
             self.terrain_x_max = (
                 self.cfg.terrain.num_rows * self.cfg.terrain.terrain_length
                 + self.cfg.terrain.border_size
@@ -1749,6 +1797,8 @@ class LeggedRobot(BaseTask):
             )
             self.terrain_y_min = -self.cfg.terrain.border_size
         else:
+            # 当前不是复杂地形，而是平地或不需要地形网格的模式。
+            # 这种情况下不需要“按地形平台出生”，而是简单地把所有并行环境摆成规则网格。
             self.custom_origins = False
             self.env_origins = torch.zeros(
                 self.num_envs, 3, device=self.device, requires_grad=False
@@ -1758,9 +1808,14 @@ class LeggedRobot(BaseTask):
             num_rows = np.ceil(self.num_envs / num_cols)
             xx, yy = torch.meshgrid(torch.arange(num_rows), torch.arange(num_cols))
             spacing = self.cfg.env.env_spacing
+            # 这里生成的是一个二维整齐排布的出生点阵列：
+            # x 和 y 方向按固定间距展开，z 方向统一放在地面高度 0，
+            # 目的是让并行环境之间互不重叠，同时保持简单稳定的初始布局。
             self.env_origins[:, 0] = spacing * xx.flatten()[: self.num_envs]
             self.env_origins[:, 1] = spacing * yy.flatten()[: self.num_envs]
             self.env_origins[:, 2] = 0.0
+            # 平地模式里所有并行环境都可视作 flat 类别，
+            # 这样后面的日志和命令课程逻辑仍然可以复用统一的 flat 索引接口。
             self.flat_idx = torch.arange(self.num_envs, device=self.device)
 
     # 作用：
@@ -1949,7 +2004,7 @@ class LeggedRobot(BaseTask):
             # 鼓励机身高度贴近命令高度。误差越小越接近 1。
             base_height_error = torch.square(self.base_height - self.commands[:, 2])
             return torch.exp(-base_height_error / 0.001)
-        
+
     # self.commands 第二维 4 个分量的实际含义是：
     #     0: 前向速度命令 lin_vel_x
     #     1: 实际使用的偏航角速度命令 ang_vel_yaw
@@ -2067,7 +2122,7 @@ class LeggedRobot(BaseTask):
         out_of_limits += (self.dof_pos[:, 3:5] - self.dof_pos_limits[3:5, 1]).clip(
             min=0.0
         )
-        
+
         return torch.sum(out_of_limits, dim=1)
 
     def _reward_dof_vel_limits(self):
