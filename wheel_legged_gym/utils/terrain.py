@@ -243,7 +243,7 @@ class Terrain:
         elif choice < self.proportions[4]:
             if choice < self.proportions[3]:
                 step_height *= -1
-            single_step_pyramid_stairs_terrain(
+            two_step_pyramid_stairs_terrain(
                 terrain, step_height=step_height, platform_size=4.0
             )
         elif choice < self.proportions[5]:
@@ -339,12 +339,15 @@ def gap_terrain(terrain, gap_size, platform_size=1.0):
     ] = 0
 
 
-def single_step_pyramid_stairs_terrain(terrain, step_height, platform_size=1.0):
-    """生成“单级台阶”版本的金字塔台阶地形。
+def two_step_pyramid_stairs_terrain(terrain, step_height, platform_size=1.0):
+    """生成“二级台阶”版本的金字塔台阶地形。
 
-    与 Isaac Gym 自带的 `pyramid_stairs_terrain(...)` 不同，这里不再向外生成多级同心台阶，
-    而是只保留中心平台与外围平地之间的一次高度跃迁。
-    这样对 VMC FYT 来说，仍然保留“上/下台阶”这一类地形扰动，但难度会明显低于多级台阶。
+    相比原始的多级同心台阶，这里只保留两级高度跃迁：
+    - 外圈平地
+    - 中间一圈过渡台阶
+    - 中心平台
+
+    这样仍能保留明显的台阶结构，但难度低于原始多级台阶，高于单级台阶。
     """
     platform_size = int(platform_size / terrain.horizontal_scale)
     step_height = int(step_height / terrain.vertical_scale)
@@ -353,13 +356,24 @@ def single_step_pyramid_stairs_terrain(terrain, step_height, platform_size=1.0):
     center_y = terrain.width // 2
     half_platform = platform_size // 2
 
-    x1 = center_x - half_platform
-    x2 = center_x + half_platform
-    y1 = center_y - half_platform
-    y2 = center_y + half_platform
+    x1_inner = center_x - half_platform
+    x2_inner = center_x + half_platform
+    y1_inner = center_y - half_platform
+    y2_inner = center_y + half_platform
+
+    half_outer = min(
+        terrain.length // 2,
+        terrain.width // 2,
+        int(np.ceil(platform_size * 0.75)),
+    )
+    x1_outer = center_x - half_outer
+    x2_outer = center_x + half_outer
+    y1_outer = center_y - half_outer
+    y2_outer = center_y + half_outer
 
     terrain.height_field_raw[:, :] = 0
-    terrain.height_field_raw[x1:x2, y1:y2] = step_height
+    terrain.height_field_raw[x1_outer:x2_outer, y1_outer:y2_outer] = step_height
+    terrain.height_field_raw[x1_inner:x2_inner, y1_inner:y2_inner] = 2 * step_height
 
 
 def pit_terrain(terrain, depth, platform_size=1.0):
