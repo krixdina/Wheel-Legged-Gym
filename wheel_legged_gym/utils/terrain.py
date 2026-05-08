@@ -243,8 +243,8 @@ class Terrain:
         elif choice < self.proportions[4]:
             if choice < self.proportions[3]:
                 step_height *= -1
-            terrain_utils.pyramid_stairs_terrain(
-                terrain, step_width=0.7, step_height=step_height, platform_size=4.0
+            single_step_pyramid_stairs_terrain(
+                terrain, step_height=step_height, platform_size=4.0
             )
         elif choice < self.proportions[5]:
             num_rectangles = 20
@@ -337,6 +337,29 @@ def gap_terrain(terrain, gap_size, platform_size=1.0):
     terrain.height_field_raw[
         center_x - x1 : center_x + x1, center_y - y1 : center_y + y1
     ] = 0
+
+
+def single_step_pyramid_stairs_terrain(terrain, step_height, platform_size=1.0):
+    """生成“单级台阶”版本的金字塔台阶地形。
+
+    与 Isaac Gym 自带的 `pyramid_stairs_terrain(...)` 不同，这里不再向外生成多级同心台阶，
+    而是只保留中心平台与外围平地之间的一次高度跃迁。
+    这样对 VMC FYT 来说，仍然保留“上/下台阶”这一类地形扰动，但难度会明显低于多级台阶。
+    """
+    platform_size = int(platform_size / terrain.horizontal_scale)
+    step_height = int(step_height / terrain.vertical_scale)
+
+    center_x = terrain.length // 2
+    center_y = terrain.width // 2
+    half_platform = platform_size // 2
+
+    x1 = center_x - half_platform
+    x2 = center_x + half_platform
+    y1 = center_y - half_platform
+    y2 = center_y + half_platform
+
+    terrain.height_field_raw[:, :] = 0
+    terrain.height_field_raw[x1:x2, y1:y2] = step_height
 
 
 def pit_terrain(terrain, depth, platform_size=1.0):
