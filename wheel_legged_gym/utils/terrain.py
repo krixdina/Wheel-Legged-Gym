@@ -203,7 +203,14 @@ class Terrain:
             horizontal_scale=self.cfg.horizontal_scale,
         )
         # 下面这些参数都由 difficulty 推出。difficulty 越大，地形通常越激进。
-        slope = difficulty * 0.5
+        #
+        # 当前 curriculum / randomized_terrain 实际使用的最高难度是 0.9，
+        # 这里将其重新标定为：
+        # - 光滑坡最高约 20 度
+        # - 粗糙坡最高约 10 度
+        difficulty_ratio = np.clip(difficulty / 0.9, 0.0, 1.0)
+        smooth_slope = np.tan(np.deg2rad(20.0)) * difficulty_ratio
+        rough_slope = np.tan(np.deg2rad(10.0)) * difficulty_ratio
         random_height = 0.05 + difficulty * 0.05
         step_height = 0.05 + 0.18 * difficulty
         discrete_obstacles_height = 0.05 + difficulty * 0.1
@@ -220,18 +227,18 @@ class Terrain:
                 choice
                 < self.proportions[0] + (self.proportions[1] - self.proportions[0]) / 2
             ):
-                slope *= -1
+                smooth_slope *= -1
             terrain_utils.pyramid_sloped_terrain(
-                terrain, slope=slope, platform_size=3.0
+                terrain, slope=smooth_slope, platform_size=3.0
             )
         elif choice < self.proportions[2]:
             if (
                 choice
                 < self.proportions[1] + (self.proportions[2] - self.proportions[1]) / 2
             ):
-                slope *= -1
+                rough_slope *= -1
             terrain_utils.pyramid_sloped_terrain(
-                terrain, slope=slope * 0.5, platform_size=3.0
+                terrain, slope=rough_slope, platform_size=3.0
             )
             terrain_utils.random_uniform_terrain(
                 terrain,
