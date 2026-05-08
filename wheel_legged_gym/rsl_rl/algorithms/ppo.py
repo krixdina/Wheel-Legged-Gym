@@ -328,10 +328,15 @@ class PPO:
             )
             for next_obs_batch, critic_obs_batch, obs_history_batch in generator:
                 if self.actor_critic.is_sequence:
+                    # 用历史观测窗口生成 latent 隐变量。默认 latent 的前 3 维会被下面的 vel_est_loss
+                    # 监督为机体线速度估计值，也就是用普通观测历史去拟合 critic 特权观测中可见的真实线速度。
                     latent_batch = self.actor_critic.encode(obs_history_batch)
                     vel_est_loss = (
                         (latent_batch[:, :3] - critic_obs_batch[:, :3]).pow(2).mean()
                     )
+                    # 当 latent 维度大于 3 时，除前三维速度估计外，额外维度也会按“相同下标位置”
+                    # 去拟合 critic 可见观测中的对应片段。这里不会自动理解每一维的物理含义，
+                    # 只是把 latent[:, 3:latent_dim] 和 critic_obs[:, 3:latent_dim] 做均方误差监督。
                     if self.actor_critic.latent_dim > 3:
                         obs_denoise_loss = (
                             (
@@ -341,6 +346,8 @@ class PPO:
                             .pow(2)
                             .mean()
                         )
+                        # encoder 的额外监督目标由两部分组成：前三维的机体线速度估计损失，
+                        # 加上 latent 后续维度对 critic 可见观测对应切片的拟合损失。
                         extra_loss = vel_est_loss + obs_denoise_loss
                     else:
                         extra_loss = vel_est_loss

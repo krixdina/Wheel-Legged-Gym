@@ -431,6 +431,9 @@ class LeggedRobotVMC(LeggedRobot):
         self.obs_buf = self.compute_proprioception_observations()
 
         if self.cfg.env.num_privileged_obs is not None:
+            # heights 是 critic 专用的地形高度特权信息：
+            # _get_heights() 会在机器人周围按 11 x 7 个采样点读取地形高度，
+            # 这里再转成 base_link 下方 0.5m 处参考面相对周围地形的高度差，并做裁剪和尺度归一化。
             heights = (
                 torch.clip(
                     self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights,
@@ -439,17 +442,34 @@ class LeggedRobotVMC(LeggedRobot):
                 )
                 * self.obs_scales.height_measurements
             )
+
+            # privileged_obs_buf 是训练阶段给 critic 使用的特权观测，不是 actor 的部署输入。
+            # VMC 任务中每个环境这里拼出 155 维环境特权观测；后续 ActorCriticSequence
+            # 还会在 PPO.act() 中给 critic 输入额外拼接 latent，因此 rollout_storage 里保存的 critic
+            # observation 维度会比这里再多 latent_dim。
             self.privileged_obs_buf = torch.cat(
                 (
+                    # critic 可以直接看到真实机体线速度；actor 的 self.obs_buf 中没有这一项，
+                    # 默认由历史观测编码器用过去的普通观测去估计。
                     self.base_lin_vel * self.obs_scales.lin_vel,
+                    # actor 当前可见的普通 VMC 观测：机体角速度、重力方向、运动命令、
+                    # 虚拟腿状态、轮关节状态和当前动作。
                     self.obs_buf,
+                    # 当前动作和上一拍动作副本，用于让 critic 感知动作变化和控制平滑性。
                     self.last_actions[:, :, 0],
                     self.last_actions[:, :, 1],
+                    # critic 专用的完整关节动力学信息；VMC actor 主要看虚拟腿状态，
+                    # 这里额外保留原始关节加速度、位置偏差和速度，帮助价值函数估计。
                     self.dof_acc * self.obs_scales.dof_acc,
                     (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
                     self.dof_vel * self.obs_scales.dof_vel,
+                    # 77 维地形采样特征，只进入 critic 的特权观测。
                     heights,
+                    # 当前真实输出力矩，以及 domain randomization 相关参数。
+                    # 这些量通常不应作为 actor 部署输入，但 critic 训练时可以用它们降低价值估计难度。
                     self.torques * self.obs_scales.torque,
+                    # 每个环境 base 质量相对当前并行环境平均质量的偏差；若未开启 base 质量随机化，
+                    # 这一维通常接近 0。
                     (self.base_mass - self.base_mass.mean()).view(self.num_envs, 1),
                     self.base_com,
                     self.default_dof_pos - self.raw_default_dof_pos,
@@ -464,7 +484,8 @@ class LeggedRobotVMC(LeggedRobot):
             self.obs_buf += (
                 2 * torch.rand_like(self.obs_buf) - 1
             ) * self.noise_scale_vec
-
+        
+        # 去掉旧 obs_history 最早的一帧，把当前 obs_buf 接到最后面，形成新的 obs_history。
         self.obs_history = torch.cat(
             (self.obs_history[:, self.num_obs :], self.obs_buf), dim=-1
         )

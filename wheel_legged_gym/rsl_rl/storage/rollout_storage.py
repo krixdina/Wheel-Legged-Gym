@@ -215,18 +215,31 @@ class RolloutStorage:
                     None,
                 ), None
 
+    # 作用：为历史观测编码器单独生成监督训练用的小批量数据。这里取出的历史观测是 rollout 采样阶段保存下来的滑动窗口，
+    #      每条样本由最近若干帧普通观测首尾拼接而成。
+    # 输入：num_mini_batches 表示每轮更新把完整 rollout 样本平均切成多少个小批量；
+    #      num_epochs 表示同一批 rollout 数据会被重复遍历多少轮来训练编码器。
+    # 输出：逐次 yield 三个张量：动作后的普通观测、critic 训练时可见的观测目标、以及编码器输入的历史观测窗口；
     def encoder_mini_batch_generator(self, num_mini_batches, num_epochs=8):
+        # 总样本数等于“每个并行环境采样步数 × 并行环境数量”；每条样本对应某个环境在某个采样时刻的一次 transition。
+        # 如果总样本数不能被小批量数量整除，后面只会随机使用能组成完整小批量的那部分样本。
         batch_size = self.num_envs * self.num_transitions_per_env
         mini_batch_size = batch_size // num_mini_batches
         indices = torch.randperm(num_mini_batches * mini_batch_size, requires_grad=False, device=self.device)
 
+        # rollout 缓冲区原本按“采样时间步、并行环境编号、观测维度”存储；
+        # 展平前两个维度后，每一行就变成一条可随机抽样的训练样本。
         next_observations = self.next_observations.flatten(0, 1)
         if self.privileged_observations is not None:
             critic_observations = self.privileged_observations.flatten(0, 1)
         else:
             critic_observations = self.observations.flatten(0, 1)
+        # 这里的 obs_history 表示历史观测滑动窗口集合。默认配置下，每条历史窗口由 5 帧普通观测拼成：
+        # [obs(t-4), obs(t-3), obs(t-2), obs(t-1), obs(t)]，每帧普通观测是 27 维，因此单条历史窗口是 135 维。
         obs_history = self.observation_history.flatten(0, 1)
 
+        # 每个 epoch 都复用同一批 rollout 数据；每个 mini-batch 用随机索引取出一组样本，
+        # 供 PPO.update() 中的 encoder 额外监督损失使用。
         for epoch in range(num_epochs):
             for i in range(num_mini_batches):
                 start = i * mini_batch_size
@@ -235,6 +248,8 @@ class RolloutStorage:
 
                 next_obs_batch = next_observations[batch_idx]
                 critic_observations_batch = critic_observations[batch_idx]
+                # obs_history_batch 是当前小批量中的历史观测窗口，形状是 [mini_batch_size, num_obs * obs_history_length]；
+                # 它会作为 encoder 的输入，用来生成 latent，再与 critic 可见观测中的真实状态计算监督损失。
                 obs_history_batch = obs_history[batch_idx]
                 yield next_obs_batch, critic_observations_batch, obs_history_batch
 

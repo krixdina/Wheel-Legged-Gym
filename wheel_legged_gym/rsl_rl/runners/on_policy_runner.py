@@ -157,7 +157,11 @@ class OnPolicyRunner:
                 # 用当前策略在所有并行环境中采样固定步数，并把每一步转移数据存入 PPO 的 rollout 缓冲区。
                 # num_steps_per_env 用于表示每次执行 PPO 更新前要在每个环境中采集多少步数据；不是 max_episode_length 表示的回合上限步数
                 for i in range(self.num_steps_per_env):
+                    # 这里的动作由当前普通观测和历史观测共同决定：如果策略使用 ActorCriticSequence，
+                    # self.alg.act(...) 内部会先用 obs_history 通过 encoder 生成 latent，再用 obs + latent 输出 actions。
                     actions = self.alg.act(obs, obs_history, critic_obs)
+                    # env.step(...) 只推进物理仿真并返回环境侧的新数据：普通观测、特权观测、奖励、结束标记、日志信息和更新后的历史观测。
+                    # 它不会把 latent 写进 obs；下一轮循环开始时，latent 会再次由 self.alg.act(...) 根据最新 obs_history 重新计算。
                     obs, privileged_obs, rewards, dones, infos, obs_history = (
                         self.env.step(actions)
                     )
@@ -169,6 +173,7 @@ class OnPolicyRunner:
                         rewards.to(self.device),
                         dones.to(self.device),
                     )
+                    # 存储当前 step 的 transition 数据到 PPO 的 rollout 存储器中，供后续统一训练使用。
                     self.alg.process_env_step(rewards, dones, infos, obs)
 
                     if self.log_dir is not None:
