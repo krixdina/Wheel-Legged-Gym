@@ -367,6 +367,17 @@ class LeggedRobot(BaseTask):
             | self.edge_reset_buf
         )
 
+    # command curriculum 更新时机说明：
+    # +------------------------------------------------------+--------------------------------------+----------------------+
+    # | 情况                                                 | 是否调用 update_command_curriculum()  | 是否一定扩大 command   |
+    # +------------------------------------------------------+--------------------------------------+----------------------+
+    # | 某些环境 episode 结束，但 commands.curriculum=False    | 否                                   | 否                   |
+    # | 地形课程开启，episode reset 发生                        | 通常会调用一次                        | 不一定                |
+    # | 地形课程开启，但没有 success_ids 这组成功环境编号          | 调用也不会扩大                        | 否                   |
+    # | 地形课程开启，有 success_ids 但奖励达不到阈值             | 会检查                               | 否                   |
+    # | 地形课程关闭，episode reset 发生但全局步数不在周期点       | 不调用                               | 否                   |
+    # | 地形课程关闭，全局步数到周期点且奖励达标                   | 调用并扩大                            | 是                   |
+    # +------------------------------------------------------+--------------------------------------+----------------------+
     def reset_idx(self, env_ids):
         """Reset some environments.
             Calls self._reset_dofs(env_ids), self._reset_root_states(env_ids), and self._resample_commands(env_ids)
@@ -926,6 +937,17 @@ class LeggedRobot(BaseTask):
             gymapi.ENV_SPACE,
         )
 
+    # 作用：
+    # 在启用地形课程学习时，根据刚结束的若干并行环境的移动距离和速度跟踪奖励，
+    # 调整这些环境下一轮 episode 所处的地形难度，并同步更新它们的出生点。
+    #
+    # 输入：
+    # env_ids 这个参数表示本轮需要重置的一组并行环境编号；函数只会读取和修改这些编号对应的环境状态。
+    #
+    # 输出：
+    # 这个函数没有显式返回值；它通过修改当前环境对象 self 中保存的训练状态产生效果。
+    # 主要副作用包括：更新每个相关环境的地形难度层级、记录越过最高难度或低于最低难度的环境编号、
+    # 重新选择对应地形块的世界坐标出生点，并在命令课程学习开启时收紧失败环境的前进速度指令范围。
     def _update_terrain_curriculum(self, env_ids):
         """Implements the game-inspired curriculum.
 
@@ -933,34 +955,52 @@ class LeggedRobot(BaseTask):
             env_ids (List[int]): ids of environments being reset
         """
         # Implement Terrain curriculum
+        # 初始化阶段的 reset 只负责把环境放到初始位置；此时没有完整 episode 表现可用于判断难度升降。
         if not self.init_done:
             # don't change on initial reset
             return
+        # distance 表示每个待重置环境中的机器人，从本轮出生点到当前水平位置已经移动的平面距离。
+        # 这个距离用于判断机器人是否已经走过了足够长的地形段。
         distance = torch.norm(
             self.root_states[env_ids, :2] - self.env_origins[env_ids, :2], dim=1
         )
         # robots that walked far enough progress to harder terains
+        # move_up 表示哪些待重置环境应进入更高难度：机器人水平移动距离超过当前子地形长度的一半。
         move_up = distance > self.terrain.env_length / 2
         # robots that walked less than half of their required distance go to simpler terrains
+        # move_down 表示哪些待重置环境应降到更低难度：
+        # 同时满足线速度跟踪奖励偏低，且没有满足升级条件。
+        # episode_sums 中的 tracking_lin_vel 是当前 episode 累计的线速度跟踪奖励；
+        # reward_scales 中的 tracking_lin_vel 是按仿真步长缩放后的该奖励项权重，在 config 中默认为 1.0。
         move_down = (
             self.episode_sums["tracking_lin_vel"][env_ids] / self.max_episode_length_s
             < (self.reward_scales["tracking_lin_vel"] / self.dt) * 0.4
         ) * ~move_up
+        # terrain_levels 表示每个并行环境当前所在的地形难度层；升级环境加一层，降级环境减一层。
         self.terrain_levels[env_ids] += 1 * move_up - 1 * move_down
+        # success_ids 记录本次更新后已经越过最高地形难度的环境编号，后续命令课程学习会使用这些成功样本。
         mask = self.terrain_levels[env_ids] >= self.max_terrain_level
         self.success_ids = env_ids[mask]
+        # fail_ids 记录本次更新后低于最低地形难度的环境编号，后面会对这些环境收紧速度命令范围。
         mask = self.terrain_levels[env_ids] < 0
         self.fail_ids = env_ids[mask]
         # Robots that solve the last level are sent to a random one
+        # 对越过最高难度的环境，随机分配一个合法难度层，避免长期停留在边界；
+        # 对降到零以下的环境，把最低难度限制为零。
         self.terrain_levels[env_ids] = torch.where(
             self.terrain_levels[env_ids] >= self.max_terrain_level,
             torch.randint_like(self.terrain_levels[env_ids], self.max_terrain_level),
             torch.clip(self.terrain_levels[env_ids], 0),
         )  # (the minumum level is zero)
+
+        # env_origins 保存每个并行环境下一轮 reset 使用的世界坐标出生点；
+        # terrain_origins 是按“难度层 x 地形类别”组织的地形块原点表。
         self.env_origins[env_ids] = self.terrain_origins[
             self.terrain_levels[env_ids], self.terrain_types[env_ids]
         ]
         if self.cfg.commands.curriculum:
+            # command_ranges 中的 lin_vel_x 表示前进方向速度命令的采样下界和上界；
+            # 对失败环境缩小可采样速度范围，让下一轮任务要求更保守。
             self.command_ranges["lin_vel_x"][self.fail_ids, 0] = torch.clip(
                 self.command_ranges["lin_vel_x"][self.fail_ids, 0] + 0.25,
                 -self.cfg.commands.basic_max_curriculum,
@@ -972,6 +1012,18 @@ class LeggedRobot(BaseTask):
                 self.cfg.commands.basic_max_curriculum,
             )
 
+    # 作用：
+    # 在启用命令课程学习时，根据机器人对速度指令的跟踪表现，逐步扩大前进速度指令的采样范围，
+    # 让训练任务从较保守的速度要求过渡到更宽的速度要求。
+    #
+    # 输入：
+    # env_ids 这个参数表示本次用于评估命令课程推进条件的一组并行环境编号；
+    # 在地形课程学习关闭时，函数直接使用这些环境的平均奖励表现判断是否扩大所有环境的速度命令范围。
+    # 在地形课程学习开启时，函数主要使用 success_ids 这个由地形课程逻辑记录的成功环境编号，
+    #
+    # 输出：
+    # 这个函数没有显式返回值；它会修改 command_ranges 中 lin_vel_x 这一项，
+    # 也就是每个并行环境前进方向速度命令的采样下界和上界。
     def update_command_curriculum(self, env_ids):
         """Implements a curriculum of increasing commands
 
@@ -982,6 +1034,10 @@ class LeggedRobot(BaseTask):
         if self.cfg.terrain.curriculum and len(self.success_ids) != 0:
             # self.basic_terrain_idx = torch.cat((self.stair_up_idx, self.discrete_idx))
             # self.advanced_terrain_idx
+            # 在地形课程学习开启时，只检查已经通过最高地形难度的成功环境。
+            # episode_sums 中的 tracking_lin_vel 表示每个环境当前 episode 累计的线速度跟踪奖励；
+            # reward_scales 中的 tracking_lin_vel 表示按单步时长缩放后的线速度跟踪奖励权重。
+            # mask 表示这些成功环境里，哪些环境的平均线速度跟踪奖励超过了课程推进阈值。
             mask = (
                 self.episode_sums["tracking_lin_vel"][self.success_ids]
                 / self.max_episode_length
@@ -989,15 +1045,21 @@ class LeggedRobot(BaseTask):
                 * self.reward_scales["tracking_lin_vel"]
             )
             success_ids = self.success_ids[mask]
+            # basic_ids 表示成功环境中属于基础地形组的环境编号；
+            # 基础地形组相对更容易，因此后面会比普通成功环境额外扩大更多速度命令范围。
             basic_ids = torch.any(
                 success_ids.unsqueeze(1) == self.basic_terrain_idx.unsqueeze(0), dim=1
             )
             basic_ids = success_ids[basic_ids]
+            # 对通过筛选的成功环境，分别降低前进速度下界、提高前进速度上界。
+            # 对基础地形组中的成功环境，再额外扩大一次范围，使简单地形上的命令难度增长更快。
             self.command_ranges["lin_vel_x"][success_ids, 0] -= 0.05
             self.command_ranges["lin_vel_x"][success_ids, 1] += 0.05
             self.command_ranges["lin_vel_x"][basic_ids, 0] -= 0.45
             self.command_ranges["lin_vel_x"][basic_ids, 1] += 0.45
 
+            # 扩大范围后，把基础地形组和高阶地形组分别限制在各自允许的最大命令范围内，
+            # 避免速度命令无限增长到配置边界之外。
             self.command_ranges["lin_vel_x"][self.basic_terrain_idx, :] = torch.clip(
                 self.command_ranges["lin_vel_x"][self.basic_terrain_idx, :],
                 -self.cfg.commands.basic_max_curriculum,
@@ -1009,6 +1071,8 @@ class LeggedRobot(BaseTask):
                 self.cfg.commands.advanced_max_curriculum,
             )
         if self.cfg.terrain.curriculum == False:
+            # 在没有地形课程学习时，不区分地形成功样本；
+            # 只有当传入环境集合的线速度和角速度跟踪奖励都达到阈值，才统一扩大所有环境的前进速度命令范围。
             if (
                 torch.mean(self.episode_sums["tracking_lin_vel"][env_ids])
                 / self.max_episode_length
@@ -1020,6 +1084,8 @@ class LeggedRobot(BaseTask):
                 * self.reward_scales["tracking_ang_vel"]
                 * 0.8
             ):
+                # command_ranges 中的 lin_vel_x 保存前进方向速度命令的采样下界和上界；
+                # 这里把所有环境的下界向更负方向扩展、上界向更正方向扩展，同时限制在基础课程允许范围内。
                 self.command_ranges["lin_vel_x"][:, 0] = torch.clip(
                     self.command_ranges["lin_vel_x"][:, 0] - 0.1,
                     -self.cfg.commands.basic_max_curriculum,

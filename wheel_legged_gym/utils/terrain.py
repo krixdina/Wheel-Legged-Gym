@@ -36,6 +36,17 @@ from isaacgym import terrain_utils
 from wheel_legged_gym.envs.base.legged_robot_config import LeggedRobotCfg
 
 
+# 机器人在课程地形上的初始分配策略：
+# 1. 这个 Terrain 类只负责生成一张 num_rows x num_cols 的大地图；
+#    默认配置中 num_rows = 10 表示 10 个难度行，num_cols = 20 表示 20 个地形类型列。
+# 2. 具体把每个并行机器人放到哪一块子地形上，是在 LeggedRobot._get_env_origins() 中完成的：
+#    terrain_levels 表示每个机器人所在的难度行，terrain_types 表示每个机器人所在的地形类型列。
+# 3. terrain_types 由环境编号按 num_cols 均匀划分；默认 num_envs=4096、num_cols=20，
+#    所以每个地形类型列大约分到 204 或 205 个机器人。
+# 4. 默认 curriculum=True 且 max_init_terrain_level=5，因此训练刚开始时：
+#    terrain_levels ∈ {0, 1, 2, 3, 4, 5}，也就是每列分配到的机器人只从前 6 个难度行中随机初始化。
+# 5. 机器人最终出生点由 terrain_origins[terrain_levels, terrain_types] 查表得到；
+#    后续课程学习主要改变 terrain_levels，让机器人在同一地形类型列中上下移动难度。
 class Terrain:
     def __init__(self, cfg: LeggedRobotCfg.terrain, num_robots) -> None:
         """地形构建器。
@@ -221,8 +232,12 @@ class Terrain:
         # `choice` 与累积概率区间 `self.proportions` 对比后，
         # 决定当前子地形属于哪一种类别。
         if choice < self.proportions[0]:
+            # 第一段比例区间生成近似平地：这里仍调用金字塔坡地生成器，
+            # 但坡度设为 0，只保留中心平台和基本高度图结构。
             terrain_utils.pyramid_sloped_terrain(terrain, slope=0, platform_size=3.0)
         elif choice < self.proportions[1]:
+            # 第二段比例区间生成平滑坡地；区间前半段把坡度取反，
+            # 用同一类地形覆盖两列相反方向的金字塔坡面地形。
             if (
                 choice
                 < self.proportions[0] + (self.proportions[1] - self.proportions[0]) / 2
@@ -232,6 +247,8 @@ class Terrain:
                 terrain, slope=smooth_slope, platform_size=3.0
             )
         elif choice < self.proportions[2]:
+            # 第三段比例区间生成粗糙坡地：先生成较缓的坡面，
+            # 再叠加随机高度扰动，让地表不再是光滑平面。
             if (
                 choice
                 < self.proportions[1] + (self.proportions[2] - self.proportions[1]) / 2
@@ -248,12 +265,15 @@ class Terrain:
                 downsampled_scale=0.2,
             )
         elif choice < self.proportions[4]:
+            # 第四、第五段比例区间共同生成台阶地形；
+            # 前一段把台阶高度取反，后一段保持正值，用于得到两种相反高度方向的金字塔式台阶。
             if choice < self.proportions[3]:
                 step_height *= -1
             two_step_pyramid_stairs_terrain(
                 terrain, step_height=step_height, platform_size=4.0
             )
         elif choice < self.proportions[5]:
+            # 第六段比例区间生成离散障碍地形，在中心平台外随机放置若干矩形障碍块。
             num_rectangles = 20
             rectangle_min_size = 1.0
             rectangle_max_size = 2.0
@@ -266,6 +286,7 @@ class Terrain:
                 platform_size=3.0,
             )
         elif choice < self.proportions[6]:
+            # 如果配置中继续扩展了地形比例区间，这一段可生成踏石地形。
             terrain_utils.stepping_stones_terrain(
                 terrain,
                 stone_size=stepping_stones_size,
@@ -274,8 +295,10 @@ class Terrain:
                 platform_size=4.0,
             )
         elif choice < self.proportions[7]:
+            # 如果配置中继续扩展了地形比例区间，这一段可生成中间带缺口的地形。
             gap_terrain(terrain, gap_size=gap_size, platform_size=3.0)
         else:
+            # 剩余比例区间生成坑洞地形；当前默认比例配置下通常不会进入这里。
             pit_terrain(terrain, depth=pit_depth, platform_size=4.0)
 
         return terrain

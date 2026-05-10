@@ -79,7 +79,7 @@ class LeggedRobotCfg(BaseConfig):
         terrain_width = 8.0
         num_rows = 10  # number of terrain rows (levels)
         num_cols = 20  # number of terrain cols (types)
-        # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
+        # terrain types: [flat, smooth slope, rough slope, stairs up, stairs down, discrete]
         terrain_proportions = [0.2, 0.2, 0.2, 0.1, 0.2, 0.1]
         # trimesh only:
         slope_treshold = (
