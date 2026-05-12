@@ -214,10 +214,10 @@ class Terrain:
             horizontal_scale=self.cfg.horizontal_scale,
         )
         # 下面这些参数都由 difficulty 推出。difficulty 越大，地形通常越激进。
-        slope = difficulty * 0.4044
+        slope = difficulty * 0.404
         random_height = 0.05 + difficulty * 0.05
         step_height = 0.05 + 0.18 * difficulty
-        discrete_obstacles_height = 0.05 + difficulty * 0.1
+        discrete_obstacles_height = 0.05 + difficulty * 0.05
         stepping_stones_size = 1.5 * (1.05 - difficulty)
         stone_distance = 0.05 if difficulty == 0 else 0.1
         gap_size = 1.0 * difficulty
@@ -248,7 +248,7 @@ class Terrain:
             ):
                 slope *= -1
             terrain_utils.pyramid_sloped_terrain(
-                terrain, slope=slope * 0.4845, platform_size=3.0
+                terrain, slope=slope * 0.485, platform_size=3.0
             )
             terrain_utils.random_uniform_terrain(
                 terrain,
