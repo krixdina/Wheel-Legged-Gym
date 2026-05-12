@@ -53,6 +53,16 @@ from .wheel_legged_vmc_flat_fyt.wheel_legged_vmc_flat_fyt_config import (
     WheelLeggedVMCFlatFYTCfg,
     WheelLeggedVMCFlatFYTCfgPPO,
 )
+from .Ablation import (
+    FYTAblationNoSequenceCfg,
+    FYTAblationNoSequenceCfgPPO,
+    FYTAblationNoCurriculumCfg,
+    FYTAblationNoCurriculumCfgPPO,
+    FYTAblationTerrainCurriculumOnlyCfg,
+    FYTAblationTerrainCurriculumOnlyCfgPPO,
+    FYTAblationNoEnhanceRewardsCfg,
+    FYTAblationNoEnhanceRewardsCfgPPO,
+)
 
 
 import os
@@ -91,4 +101,38 @@ task_registry.register(
     LeggedRobotVMCFYT,
     WheelLeggedVMCFlatFYTCfg(),
     WheelLeggedVMCFlatFYTCfgPPO(),
+)
+
+# FYT ablation task: replace ActorCriticSequence with ActorCritic to remove
+# history-based latent velocity estimation while keeping the baseline environment.
+task_registry.register(
+    "ablation_fyt_no_sequence",
+    LeggedRobotVMCFYT,
+    FYTAblationNoSequenceCfg(),
+    FYTAblationNoSequenceCfgPPO(),
+)
+
+# FYT ablation task: disable both terrain curriculum and command curriculum.
+task_registry.register(
+    "ablation_fyt_no_curriculum",
+    LeggedRobotVMCFYT,
+    FYTAblationNoCurriculumCfg(),
+    FYTAblationNoCurriculumCfgPPO(),
+)
+
+# FYT ablation task: keep terrain curriculum enabled, but disable command curriculum.
+task_registry.register(
+    "ablation_fyt_terrain_curriculum_only",
+    LeggedRobotVMCFYT,
+    FYTAblationTerrainCurriculumOnlyCfg(),
+    FYTAblationTerrainCurriculumOnlyCfgPPO(),
+)
+
+# FYT ablation task: disable the enhance reward terms while keeping the baseline
+# sequence policy and curriculum settings.
+task_registry.register(
+    "ablation_fyt_no_enhance_rewards",
+    LeggedRobotVMCFYT,
+    FYTAblationNoEnhanceRewardsCfg(),
+    FYTAblationNoEnhanceRewardsCfgPPO(),
 )
