@@ -267,7 +267,7 @@ def play_keyboard(args):
     if MOVE_CAMERA:
         update_camera_follow(env, env_cfg, camera_robot_index)
 
-    for _ in range(1000 * int(env.max_episode_length)):
+    for i in range(1000 * int(env.max_episode_length)):
         if handle_keyboard_events(env, command):
             obs, obs_history = refresh_policy_observations(env)
 
@@ -291,6 +291,6 @@ def play_keyboard(args):
 if __name__ == "__main__":
     MOVE_CAMERA = True
     CAMERA_ROBOT_INDEX = 21
-    RECORD_FRAMES = False
+    RECORD_FRAMES = True
     args = get_args()
     play_keyboard(args)
