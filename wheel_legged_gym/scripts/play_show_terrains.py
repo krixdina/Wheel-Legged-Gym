@@ -112,6 +112,12 @@ def parse_args():
                 "default": False,
                 "help": "Use the task's original terrain layout instead of forcing a full curriculum gallery.",
             },
+            {
+                "name": "--light_preset",
+                "type": str,
+                "default": "side",
+                "help": "Lighting preset: side or ambient.",
+            },
         ],
     )
     args.sim_device_id = args.compute_device_id
@@ -126,6 +132,8 @@ def validate_args(args):
         raise ValueError("Terrain preview requires a viewer, so --headless is not supported.")
     if args.camera not in {"top", "angled"}:
         raise ValueError("--camera must be either 'top' or 'angled'.")
+    if args.light_preset not in {"side", "ambient"}:
+        raise ValueError("--light_preset must be either 'side' or 'ambient'.")
     if args.frames_before_capture < 0:
         raise ValueError("--frames_before_capture must be non-negative.")
 
@@ -192,6 +200,27 @@ def hide_robot(env):
     )
 
 
+def apply_terrain_lighting(env, preset):
+    if preset == "ambient":
+        # Remove the directional "sun" entirely and keep only uniform ambient light.
+        light_color = gymapi.Vec3(0.0, 0.0, 0.0)
+        light_ambient = gymapi.Vec3(0.72, 0.72, 0.72)
+        light_direction = gymapi.Vec3(1.0, 0.0, 0.0)
+    else:
+        # Use a shallow side light to keep relief visible without top-down glare.
+        light_color = gymapi.Vec3(0.55, 0.55, 0.55)
+        light_ambient = gymapi.Vec3(0.42, 0.42, 0.42)
+        light_direction = gymapi.Vec3(1.0, 0.35, 0.08)
+
+    env.gym.set_light_parameters(
+        env.sim,
+        0,
+        light_color,
+        light_ambient,
+        light_direction,
+    )
+
+
 def get_default_screenshot_path(task_name):
     os.makedirs(DEFAULT_SCREENSHOT_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -208,6 +237,7 @@ def save_viewer_image(env, path):
 def print_controls(args):
     print(f"Showing terrain for task: {args.task}")
     print("Robots are moved outside the camera view for terrain-only rendering.")
+    print(f"Lighting preset: {args.light_preset}")
     print("Viewer controls:")
     print("  ESC: quit")
     print("  V: toggle viewer sync")
@@ -226,6 +256,7 @@ def show_terrains(args):
     env.gym.subscribe_viewer_keyboard_event(env.viewer, gymapi.KEY_P, "save_image")
 
     camera_position, camera_target = get_camera_pose(env_cfg, args.camera)
+    apply_terrain_lighting(env, args.light_preset)
     env.set_camera(camera_position, camera_target)
 
     zero_actions = torch.zeros(
