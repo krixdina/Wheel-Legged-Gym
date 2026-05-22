@@ -225,7 +225,10 @@ def print_controls():
     print("Q/E: increase/decrease body height command by 0.20 m.")
     print("R: reset all commands.")
     if RECORD_FRAMES:
-        print("Frames will be saved every 2 environment steps for 50 FPS video composition.")
+        print(
+            f"Frames will be saved every 2 environment steps at "
+            f"{FRAME_CAPTURE_WIDTH}x{FRAME_CAPTURE_HEIGHT} for 50 FPS video composition."
+        )
 
 
 def update_camera_follow(env, env_cfg, robot_index):
@@ -233,6 +236,28 @@ def update_camera_follow(env, env_cfg, robot_index):
     target_position = np.array(env.base_position[robot_index, :].to(device="cpu"))
     camera_position = target_position + camera_offset
     env.set_camera(camera_position, target_position)
+    return camera_position, target_position
+
+
+def create_recording_camera(env, env_index):
+    camera_props = gymapi.CameraProperties()
+    camera_props.width = FRAME_CAPTURE_WIDTH
+    camera_props.height = FRAME_CAPTURE_HEIGHT
+    camera_handle = env.gym.create_camera_sensor(env.envs[env_index], camera_props)
+    if camera_handle == -1:
+        raise RuntimeError("Failed to create recording camera sensor.")
+    return camera_handle
+
+
+def update_recording_camera(
+    env, camera_handle, env_index, camera_position, target_position
+):
+    env.gym.set_camera_location(
+        camera_handle,
+        env.envs[env_index],
+        gymapi.Vec3(*camera_position.tolist()),
+        gymapi.Vec3(*target_position.tolist()),
+    )
 
 
 def play_keyboard(args):
@@ -253,6 +278,7 @@ def play_keyboard(args):
     policy = ppo_runner.get_inference_policy(device=env.device)
     img_idx = 0
     frame_dir = None
+    recording_camera = None
     if RECORD_FRAMES:
         frame_dir = os.path.join(
             WHEEL_LEGGED_GYM_ROOT_DIR,
@@ -262,10 +288,19 @@ def play_keyboard(args):
             "keyboard_frames",
         )
         os.makedirs(frame_dir, exist_ok=True)
+        recording_camera = create_recording_camera(env, camera_robot_index)
 
     print_controls()
+    camera_position = np.array(env_cfg.viewer.pos, dtype=np.float64)
+    camera_target = np.array(env_cfg.viewer.lookat, dtype=np.float64)
     if MOVE_CAMERA:
-        update_camera_follow(env, env_cfg, camera_robot_index)
+        camera_position, camera_target = update_camera_follow(
+            env, env_cfg, camera_robot_index
+        )
+    if RECORD_FRAMES:
+        update_recording_camera(
+            env, recording_camera, camera_robot_index, camera_position, camera_target
+        )
 
     for i in range(1000 * int(env.max_episode_length)):
         if handle_keyboard_events(env, command):
@@ -278,12 +313,26 @@ def play_keyboard(args):
 
         apply_keyboard_command(env, command)
         obs, _, _, _, _, obs_history = env.step(actions)
-        if RECORD_FRAMES and i % 2:
-            filename = os.path.join(frame_dir, f"{img_idx}.png")
-            env.gym.write_viewer_image_to_file(env.viewer, filename)
-            img_idx += 1
         if MOVE_CAMERA:
-            update_camera_follow(env, env_cfg, camera_robot_index)
+            camera_position, camera_target = update_camera_follow(
+                env, env_cfg, camera_robot_index
+            )
+        if RECORD_FRAMES:
+            update_recording_camera(
+                env, recording_camera, camera_robot_index, camera_position, camera_target
+            )
+            if i % 2:
+                filename = os.path.join(frame_dir, f"{img_idx}.png")
+                env.gym.step_graphics(env.sim)
+                env.gym.render_all_camera_sensors(env.sim)
+                env.gym.write_camera_image_to_file(
+                    env.sim,
+                    env.envs[camera_robot_index],
+                    recording_camera,
+                    gymapi.IMAGE_COLOR,
+                    filename,
+                )
+                img_idx += 1
         if handle_keyboard_events(env, command):
             obs, obs_history = refresh_policy_observations(env)
 
@@ -292,5 +341,7 @@ if __name__ == "__main__":
     MOVE_CAMERA = True
     CAMERA_ROBOT_INDEX = 21
     RECORD_FRAMES = True
+    FRAME_CAPTURE_WIDTH = 1920
+    FRAME_CAPTURE_HEIGHT = 1080
     args = get_args()
     play_keyboard(args)
