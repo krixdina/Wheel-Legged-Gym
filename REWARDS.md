@@ -262,4 +262,8 @@
 ```
 tensorboard --logdir logs/wheel_legged_vmc_fyt --host 0.0.0.0 --port 6007 --reload_interval 5
 python wheel_legged_gym/scripts/train.py --task=wheel_legged_vmc_flat_fyt --num_envs=4096 --headless
+python wheel_legged_gym/scripts/play_keyboard.py \
+  --task wheel_legged_vmc_fyt \
+  --experiment_name experiment_data/env_nums_experiment \
+  --load_run May11_18-43-09_num-envs-4096_dr-false 
 ``` 
