@@ -10,6 +10,7 @@ from isaacgym.torch_utils import *
 from wheel_legged_gym.envs import *
 from wheel_legged_gym.utils import get_args, task_registry
 
+import numpy as np
 import torch
 
 
@@ -223,11 +224,19 @@ def print_controls():
     print("R: reset all commands.")
 
 
+def update_camera_follow(env, env_cfg, robot_index):
+    camera_offset = np.array(env_cfg.viewer.pos, dtype=np.float64)
+    target_position = np.array(env.base_position[robot_index, :].to(device="cpu"))
+    camera_position = target_position + camera_offset
+    env.set_camera(camera_position, target_position)
+
+
 def play_keyboard(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     configure_env_for_play(env_cfg)
 
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
+    camera_robot_index = min(CAMERA_ROBOT_INDEX, env.num_envs - 1)
     command = KeyboardCommand()
     subscribe_keyboard_events(env)
     apply_keyboard_command(env, command)
@@ -240,6 +249,8 @@ def play_keyboard(args):
     policy = ppo_runner.get_inference_policy(device=env.device)
 
     print_controls()
+    if MOVE_CAMERA:
+        update_camera_follow(env, env_cfg, camera_robot_index)
 
     for _ in range(1000 * int(env.max_episode_length)):
         if handle_keyboard_events(env, command):
@@ -252,10 +263,14 @@ def play_keyboard(args):
 
         apply_keyboard_command(env, command)
         obs, _, _, _, _, obs_history = env.step(actions)
+        if MOVE_CAMERA:
+            update_camera_follow(env, env_cfg, camera_robot_index)
         if handle_keyboard_events(env, command):
             obs, obs_history = refresh_policy_observations(env)
 
 
 if __name__ == "__main__":
+    MOVE_CAMERA = False
+    CAMERA_ROBOT_INDEX = 21
     args = get_args()
     play_keyboard(args)
