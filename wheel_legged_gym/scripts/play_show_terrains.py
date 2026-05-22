@@ -204,7 +204,7 @@ def apply_terrain_lighting(env, preset):
     if preset == "ambient":
         # Remove the directional "sun" entirely and keep only uniform ambient light.
         light_color = gymapi.Vec3(0.0, 0.0, 0.0)
-        light_ambient = gymapi.Vec3(0.72, 0.72, 0.72)
+        light_ambient = gymapi.Vec3(1.25, 1.25, 1.25)
         light_direction = gymapi.Vec3(1.0, 0.0, 0.0)
     else:
         # Use a shallow side light to keep relief visible without top-down glare.
