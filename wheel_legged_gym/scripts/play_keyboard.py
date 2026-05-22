@@ -29,7 +29,7 @@ YAW_RATE_STEP = 0.1
 YAW_RATE_MIN = -3.1
 YAW_RATE_MAX = 3.1
 
-BODY_HEIGHT_STEP = 0.2
+BODY_HEIGHT_STEP = 0.03
 BODY_HEIGHT_MIN = 0.15
 BODY_HEIGHT_MAX = 0.32
 
@@ -228,7 +228,7 @@ def handle_keyboard_events(env, command):
                 command.body_height + BODY_HEIGHT_STEP, BODY_HEIGHT_MIN, BODY_HEIGHT_MAX
             )
             print_command_state(
-                "q", "increased body height command by +0.20 m.", command
+                "q", "increased body height command by +0.03 m.", command
             )
             changed = True
         elif evt.action == "keyboard_height_down":
@@ -236,7 +236,7 @@ def handle_keyboard_events(env, command):
                 command.body_height - BODY_HEIGHT_STEP, BODY_HEIGHT_MIN, BODY_HEIGHT_MAX
             )
             print_command_state(
-                "e", "decreased body height command by -0.20 m.", command
+                "e", "decreased body height command by -0.03 m.", command
             )
             changed = True
         elif evt.action == "keyboard_reset":
@@ -255,7 +255,7 @@ def print_controls(frame_dir=None):
     print("Focus the Isaac Gym viewer before pressing control keys.")
     print("W/S: increase/decrease forward velocity command by 0.10 m/s.")
     print("A/D: increase/decrease yaw rate command by 0.10 rad/s.")
-    print("Q/E: increase/decrease body height command by 0.20 m.")
+    print("Q/E: increase/decrease body height command by 0.03 m.")
     print("R: reset all commands.")
     if RECORD_FRAMES:
         print(
