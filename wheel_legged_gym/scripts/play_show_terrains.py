@@ -16,6 +16,7 @@ DEFAULT_TASK = "wheel_legged_vmc_fyt"
 DEFAULT_SCREENSHOT_DIR = os.path.join(
     WHEEL_LEGGED_GYM_ROOT_DIR, "logs", "terrain_renders"
 )
+PREVIEW_BORDER_SIZE = 80.0
 
 
 def parse_args():
@@ -144,6 +145,10 @@ def configure_env_for_terrain_view(env_cfg, use_task_layout):
     env_cfg.domain_rand.randomize_motor_torque = False
     env_cfg.domain_rand.randomize_default_dof_pos = False
     env_cfg.domain_rand.randomize_action_delay = False
+    if env_cfg.terrain.mesh_type in ["heightfield", "trimesh"]:
+        env_cfg.terrain.border_size = max(
+            float(env_cfg.terrain.border_size), PREVIEW_BORDER_SIZE
+        )
     if env_cfg.terrain.mesh_type in ["heightfield", "trimesh"] and not use_task_layout:
         env_cfg.terrain.curriculum = True
         env_cfg.terrain.selected = False
