@@ -57,6 +57,12 @@ def get_args():
             "default": False,
             "help": "Use the task's original terrain layout instead of forcing a full curriculum gallery.",
         },
+        {
+            "name": "--headless",
+            "action": "store_true",
+            "default": False,
+            "help": "Kept for CLI compatibility. This script requires a viewer and will reject headless mode.",
+        },
     ]
     args = gymutil.parse_arguments(
         description="Show Isaac Gym terrains without robots.",
@@ -70,7 +76,7 @@ def get_args():
 
 
 def validate_args(args):
-    if args.headless:
+    if getattr(args, "headless", False):
         raise ValueError("Terrain preview requires a viewer, so --headless is not supported.")
     if args.camera not in {"top", "angled"}:
         raise ValueError("--camera must be either 'top' or 'angled'.")
