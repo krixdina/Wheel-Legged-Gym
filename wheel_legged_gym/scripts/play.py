@@ -29,7 +29,9 @@
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
 from wheel_legged_gym import WHEEL_LEGGED_GYM_ROOT_DIR
+import argparse
 import os
+import sys
 
 import isaacgym
 from isaacgym.torch_utils import *
@@ -38,6 +40,39 @@ from wheel_legged_gym.utils import get_args, export_policy_as_jit, task_registry
 
 import numpy as np
 import torch
+
+
+DEFAULT_KEY_FRAME_DIR = "frames"
+
+
+def extract_recording_args():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "--key_frame_dir",
+        "--key-frame-dir",
+        "--key_frame_folder",
+        "--key-frame-folder",
+        dest="key_frame_dir",
+        default=DEFAULT_KEY_FRAME_DIR,
+        help="Folder name under logs/<experiment>/exported for saved key-frame images.",
+    )
+    recording_args, remaining_argv = parser.parse_known_args()
+    sys.argv = [sys.argv[0], *remaining_argv]
+    recording_args.key_frame_dir = validate_key_frame_dir(recording_args.key_frame_dir)
+    return recording_args
+
+
+def validate_key_frame_dir(folder_name):
+    folder_name = folder_name.strip()
+    if not folder_name:
+        raise ValueError("--key_frame_dir must not be empty.")
+    if os.path.isabs(folder_name):
+        raise ValueError("--key_frame_dir expects a folder name, not an absolute path.")
+    if os.sep in folder_name or (os.altsep is not None and os.altsep in folder_name):
+        raise ValueError("--key_frame_dir expects a folder name without path separators.")
+    if folder_name in {".", ".."}:
+        raise ValueError("--key_frame_dir must be a normal folder name.")
+    return folder_name
 
 
 def play(args):
@@ -104,6 +139,17 @@ def play(args):
     camera_direction = np.array(env_cfg.viewer.lookat) - np.array(env_cfg.viewer.pos)
     img_idx = 0
     latent = None
+    frame_dir = None
+    if RECORD_FRAMES:
+        frame_dir = os.path.join(
+            WHEEL_LEGGED_GYM_ROOT_DIR,
+            "logs",
+            train_cfg.runner.experiment_name,
+            "exported",
+            getattr(args, "key_frame_dir", DEFAULT_KEY_FRAME_DIR),
+        )
+        os.makedirs(frame_dir, exist_ok=True)
+        print(f"Frame output directory: {frame_dir}")
 
     CoM_offset_compensate = False
     vel_err_intergral = torch.zeros(env.num_envs, device=env.device)
@@ -152,14 +198,7 @@ def play(args):
         # 如果开启录帧，就定期把当前查看器画面保存成图片，便于后续合成视频或逐帧分析。
         if RECORD_FRAMES:
             if i % 2:
-                filename = os.path.join(
-                    WHEEL_LEGGED_GYM_ROOT_DIR,
-                    "logs",
-                    train_cfg.runner.experiment_name,
-                    "exported",
-                    "frames",
-                    f"{img_idx}.png",
-                )
+                filename = os.path.join(frame_dir, f"{img_idx}.png")
                 env.gym.write_viewer_image_to_file(env.viewer, filename)
                 img_idx += 1
         # 如果开启相机跟随，就把观察视角移动到指定机器人附近，使画面持续跟踪目标机器人。
@@ -266,5 +305,7 @@ if __name__ == "__main__":
     EXPORT_POLICY = True
     RECORD_FRAMES = False
     MOVE_CAMERA = False
+    recording_args = extract_recording_args()
     args = get_args()
+    args.key_frame_dir = recording_args.key_frame_dir
     play(args)
