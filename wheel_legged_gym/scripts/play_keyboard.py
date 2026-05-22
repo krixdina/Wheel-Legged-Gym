@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import dataclass
+import os
 import sys
 
 import isaacgym
 from isaacgym import gymapi
 from isaacgym.torch_utils import *
+from wheel_legged_gym import WHEEL_LEGGED_GYM_ROOT_DIR
 from wheel_legged_gym.envs import *
 from wheel_legged_gym.utils import get_args, task_registry
 
@@ -222,6 +224,8 @@ def print_controls():
     print("A/D: increase/decrease yaw rate command by 0.10 rad/s.")
     print("Q/E: increase/decrease body height command by 0.20 m.")
     print("R: reset all commands.")
+    if RECORD_FRAMES:
+        print("Frames will be saved every 2 environment steps for 50 FPS video composition.")
 
 
 def update_camera_follow(env, env_cfg, robot_index):
@@ -247,6 +251,17 @@ def play_keyboard(args):
         env=env, name=args.task, args=args, train_cfg=train_cfg
     )
     policy = ppo_runner.get_inference_policy(device=env.device)
+    img_idx = 0
+    frame_dir = None
+    if RECORD_FRAMES:
+        frame_dir = os.path.join(
+            WHEEL_LEGGED_GYM_ROOT_DIR,
+            "logs",
+            train_cfg.runner.experiment_name,
+            "exported",
+            "keyboard_frames",
+        )
+        os.makedirs(frame_dir, exist_ok=True)
 
     print_controls()
     if MOVE_CAMERA:
@@ -263,6 +278,10 @@ def play_keyboard(args):
 
         apply_keyboard_command(env, command)
         obs, _, _, _, _, obs_history = env.step(actions)
+        if RECORD_FRAMES and i % 2:
+            filename = os.path.join(frame_dir, f"{img_idx}.png")
+            env.gym.write_viewer_image_to_file(env.viewer, filename)
+            img_idx += 1
         if MOVE_CAMERA:
             update_camera_follow(env, env_cfg, camera_robot_index)
         if handle_keyboard_events(env, command):
@@ -270,7 +289,8 @@ def play_keyboard(args):
 
 
 if __name__ == "__main__":
-    MOVE_CAMERA = False
+    MOVE_CAMERA = True
     CAMERA_ROBOT_INDEX = 21
+    RECORD_FRAMES = False
     args = get_args()
     play_keyboard(args)
