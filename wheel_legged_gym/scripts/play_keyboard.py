@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import dataclass
+import argparse
 import os
 import sys
 
@@ -32,6 +33,8 @@ BODY_HEIGHT_STEP = 0.2
 BODY_HEIGHT_MIN = 0.15
 BODY_HEIGHT_MAX = 0.32
 
+DEFAULT_KEY_FRAME_DIR = "keyboard_frames"
+
 
 @dataclass
 class KeyboardCommand:
@@ -47,6 +50,36 @@ class KeyboardCommand:
 
 def clamp(value, lower, upper):
     return max(lower, min(upper, value))
+
+
+def extract_keyboard_recording_args():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "--key_frame_dir",
+        "--key-frame-dir",
+        "--key_frame_folder",
+        "--key-frame-folder",
+        dest="key_frame_dir",
+        default=DEFAULT_KEY_FRAME_DIR,
+        help="Folder name under logs/<experiment>/exported for saved key-frame images.",
+    )
+    keyboard_args, remaining_argv = parser.parse_known_args()
+    sys.argv = [sys.argv[0], *remaining_argv]
+    keyboard_args.key_frame_dir = validate_key_frame_dir(keyboard_args.key_frame_dir)
+    return keyboard_args
+
+
+def validate_key_frame_dir(folder_name):
+    folder_name = folder_name.strip()
+    if not folder_name:
+        raise ValueError("--key_frame_dir must not be empty.")
+    if os.path.isabs(folder_name):
+        raise ValueError("--key_frame_dir expects a folder name, not an absolute path.")
+    if os.sep in folder_name or (os.altsep is not None and os.altsep in folder_name):
+        raise ValueError("--key_frame_dir expects a folder name without path separators.")
+    if folder_name in {".", ".."}:
+        raise ValueError("--key_frame_dir must be a normal folder name.")
+    return folder_name
 
 
 def configure_env_for_play(env_cfg):
@@ -217,7 +250,7 @@ def handle_keyboard_events(env, command):
     return changed
 
 
-def print_controls():
+def print_controls(frame_dir=None):
     print("Keyboard control mode is ready.")
     print("Focus the Isaac Gym viewer before pressing control keys.")
     print("W/S: increase/decrease forward velocity command by 0.10 m/s.")
@@ -229,6 +262,8 @@ def print_controls():
             f"Frames will be saved every 2 environment steps at "
             f"{FRAME_CAPTURE_WIDTH}x{FRAME_CAPTURE_HEIGHT} for 50 FPS video composition."
         )
+        if frame_dir is not None:
+            print(f"Frame output directory: {frame_dir}")
 
 
 def update_camera_follow(env, env_cfg, robot_index):
@@ -285,12 +320,12 @@ def play_keyboard(args):
             "logs",
             train_cfg.runner.experiment_name,
             "exported",
-            "keyboard_frames",
+            getattr(args, "key_frame_dir", DEFAULT_KEY_FRAME_DIR),
         )
         os.makedirs(frame_dir, exist_ok=True)
         recording_camera = create_recording_camera(env, camera_robot_index)
 
-    print_controls()
+    print_controls(frame_dir)
     camera_position = np.array(env_cfg.viewer.pos, dtype=np.float64)
     camera_target = np.array(env_cfg.viewer.lookat, dtype=np.float64)
     if MOVE_CAMERA:
@@ -343,5 +378,7 @@ if __name__ == "__main__":
     RECORD_FRAMES = True
     FRAME_CAPTURE_WIDTH = 1920
     FRAME_CAPTURE_HEIGHT = 1080
+    keyboard_args = extract_keyboard_recording_args()
     args = get_args()
+    args.key_frame_dir = keyboard_args.key_frame_dir
     play_keyboard(args)
