@@ -112,6 +112,7 @@ def play(args):
     ppo_runner, train_cfg = task_registry.make_alg_runner(
         env=env, name=args.task, args=args, train_cfg=train_cfg
     )
+    # 只返回 actor 网络与 encoder 网络这两个推理时需要的模块，丢弃 critic 网络和 PPO 更新相关的模块。
     policy = ppo_runner.get_inference_policy(device=env.device)
 
     # export policy as a jit module (used to run it from C++)
@@ -167,17 +168,23 @@ def play(args):
         env.commands[:, 0] = 1.8
         env.commands[:, 2] = 0.15  # + 0.07 * np.sin(i * 0.01)
         env.commands[:, 3] = 0
-
-        # 先生成一个分阶段上升的参考速度，再根据期望前向速度与实际前向速度的误差微调控制指令。
+        
+        # 在理想模型里，机器人质心位置是准确的，策略学到的动作和速度命令之间有一套稳定关系。
+        # 但是在现实中，机器人质心位置可能会因为负荷变化、装配误差或损伤等原因发生偏移。
+        # 如果实际质心与训练中的质心不一致，那么同样的腿部力矩和速度命令可能在现实与仿真中存在较大差异
+        # 
+        # 因此在质心偏移实验中，需要额外根据目标速度与实际速度的持续误差修正前向速度命令，
+        # 用一个积分补偿量抵消这种由模型参数失配带来的稳态速度偏差。
+        # 当开启质心偏移补偿时，先生成一个分阶段上升的参考速度，再根据期望前向速度与实际前向速度的误差微调控制指令。
         if CoM_offset_compensate:
-            if i > 2000 and i < 600:
-                # 200 到 600 步之间，速度目标从 0 平滑爬升到 2.5
+            if i > 200 and i < 1200:
+                # 200 到 1200 步之间，速度目标从 0 平滑爬升到 2.5
                 vel_cmd[:] = 2.5 * np.clip((i - 200) * 0.05, 0, 1)
-            elif i < 2000 :
+            elif i < 200 :
                 vel_cmd[:] = 0
-            else: 
+            else:
                 vel_cmd[:] = 2.5
-                
+
             # vel_err_intergral 表示“速度误差的积分补偿量”：
             # 这里使用离散形式的积分近似，也就是每一步都按“当前误差 * 时间步长 env.dt”累加。
             # 因此它不是只看当前这一拍误差，而是在持续记住过去一段时间里“总是偏快还是总是偏慢”。
@@ -185,7 +192,8 @@ def play(args):
             # 最后一项 ((vel_cmd - env.base_lin_vel[:, 0]).abs() < 0.5) 是一个按环境分别生效的 0/1 门控：
             # 当“目标前向速度与实际前向速度”的误差绝对值小于 0.5 时，该项为 1，允许继续积分微调；
             # 当误差过大时，该项为 0，本步不再累加积分。
-            # 这样做的目的，是避免机器人还远没跟上目标时就过度累积积分量，减小积分饱和和补偿过猛的风险。
+            # 如果机器人长期偏慢，积分项会逐渐变大；如果长期偏快，积分项会逐渐变小。它不是只看当前一瞬间，而是在考虑：机器人在过去这一段时间里，是不是一直没跟上目标？
+            # 把积分补偿加到速度命令上。也就是说，如果机器人长期偏慢，就给策略一个更大的前向速度命令；如果长期偏快，就给策略一个更小的命令。
             vel_err_intergral += (
                 (vel_cmd - env.base_lin_vel[:, 0])
                 * env.dt
@@ -215,7 +223,7 @@ def play(args):
         # 而是把“当前这一仿真步的字段名和数值”追加保存到 Logger 内部的 state_log 中。
         # 因此同一个字段在很多步里反复记录后，会形成一条按 dt 时间排列的历史序列，
         # 如 state_log["dof_pos"] = [第1步的值, 第2步的值, 第3步的值, ...]
-        # 后续如果调用 logger.plot_states()，横轴通常就是，纵轴就是这里记录的对应物理量。
+        # 后续如果调用 logger.plot_states()，横轴通常就是 dt ，纵轴就是这里记录的对应物理量。
         if i < stop_state_log:
             logger.log_states(
                 {
