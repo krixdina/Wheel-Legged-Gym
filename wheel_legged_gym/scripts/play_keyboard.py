@@ -19,7 +19,7 @@ import torch
 
 DEFAULT_FORWARD_VELOCITY = 0.0
 DEFAULT_YAW_RATE = 0.0
-DEFAULT_BODY_HEIGHT = 0.18
+DEFAULT_BODY_HEIGHT = 0.15
 
 FORWARD_VELOCITY_STEP = 0.1
 FORWARD_VELOCITY_MIN = -2.5
@@ -105,7 +105,7 @@ def configure_env_for_play(env_cfg):
     env_cfg.domain_rand.randomize_action_delay = False
 
     env_cfg.commands.curriculum = False
-    env_cfg.commands.heading_command = False
+    env_cfg.commands.heading_command = True
     env_cfg.commands.ranges.lin_vel_x = [
         DEFAULT_FORWARD_VELOCITY,
         DEFAULT_FORWARD_VELOCITY,
@@ -374,10 +374,10 @@ def play_keyboard(args):
 
 if __name__ == "__main__":
     MOVE_CAMERA = True
-    CAMERA_ROBOT_INDEX = 21
+    CAMERA_ROBOT_INDEX = 33
     RECORD_FRAMES = True
-    FRAME_CAPTURE_WIDTH = 1920
-    FRAME_CAPTURE_HEIGHT = 1080
+    FRAME_CAPTURE_WIDTH = 1280
+    FRAME_CAPTURE_HEIGHT = 960
     keyboard_args = extract_keyboard_recording_args()
     args = get_args()
     args.key_frame_dir = keyboard_args.key_frame_dir

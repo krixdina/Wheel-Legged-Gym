@@ -128,7 +128,7 @@ def play(args):
         print("Exported policy as jit script to: ", path)
 
     logger = Logger(env.dt)
-    robot_index = 21  # which robot is used for logging
+    robot_index = 9  # which robot is used for logging
     joint_index = 1  # which joint is used for logging
     stop_state_log = 1000  # number of steps before plotting states
     stop_rew_log = (
@@ -164,7 +164,7 @@ def play(args):
             actions = policy(obs.detach())
 
         # 分别设置前向速度、机身高度和偏航角速度目标。
-        env.commands[:, 0] = 2.5
+        env.commands[:, 0] = 1.8
         env.commands[:, 2] = 0.15  # + 0.07 * np.sin(i * 0.01)
         env.commands[:, 3] = 0
 
@@ -303,8 +303,8 @@ def play(args):
 
 if __name__ == "__main__":
     EXPORT_POLICY = True
-    RECORD_FRAMES = False
-    MOVE_CAMERA = False
+    RECORD_FRAMES = True
+    MOVE_CAMERA = True
     recording_args = extract_recording_args()
     args = get_args()
     args.key_frame_dir = recording_args.key_frame_dir
