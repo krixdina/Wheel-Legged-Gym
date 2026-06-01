@@ -17,10 +17,12 @@ import numpy as np
 import torch
 
 
+# 键盘控制命令的默认值，启动和重置时都会回到这些状态。
 DEFAULT_FORWARD_VELOCITY = 0.0
 DEFAULT_YAW_RATE = 0.0
 DEFAULT_BODY_HEIGHT = 0.15
 
+# 各控制量的步进和边界，避免按键连续输入后命令超出环境可接受范围。
 FORWARD_VELOCITY_STEP = 0.1
 FORWARD_VELOCITY_MIN = -2.5
 FORWARD_VELOCITY_MAX = 2.5
@@ -36,6 +38,7 @@ BODY_HEIGHT_MAX = 0.32
 DEFAULT_KEY_FRAME_DIR = "keyboard_frames"
 
 
+# 保存当前键盘命令状态，后续会同步写入环境的 commands 和 command_ranges。
 @dataclass
 class KeyboardCommand:
     forward_velocity: float = DEFAULT_FORWARD_VELOCITY
@@ -43,16 +46,19 @@ class KeyboardCommand:
     body_height: float = DEFAULT_BODY_HEIGHT
 
     def reset(self):
+        # 将所有手动控制量恢复到脚本启动时的默认命令。
         self.forward_velocity = DEFAULT_FORWARD_VELOCITY
         self.yaw_rate = DEFAULT_YAW_RATE
         self.body_height = DEFAULT_BODY_HEIGHT
 
 
 def clamp(value, lower, upper):
+    # 将单个控制命令限制在预设范围内，防止键盘累加越界。
     return max(lower, min(upper, value))
 
 
 def extract_keyboard_recording_args():
+    # 先解析录制专用参数，再把剩余参数交回项目通用参数解析器。
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
         "--key_frame_dir",
@@ -65,11 +71,13 @@ def extract_keyboard_recording_args():
     )
     keyboard_args, remaining_argv = parser.parse_known_args()
     sys.argv = [sys.argv[0], *remaining_argv]
+    # 输出目录只允许是简单文件夹名，避免意外写到日志目录之外。
     keyboard_args.key_frame_dir = validate_key_frame_dir(keyboard_args.key_frame_dir)
     return keyboard_args
 
 
 def validate_key_frame_dir(folder_name):
+    # 校验截图子目录名称，保证后续 os.path.join 得到的是安全的相对目录。
     folder_name = folder_name.strip()
     if not folder_name:
         raise ValueError("--key_frame_dir must not be empty.")
@@ -83,6 +91,7 @@ def validate_key_frame_dir(folder_name):
 
 
 def configure_env_for_play(env_cfg):
+    # 为交互式播放缩短回合、限制并行环境数量，并保留可视化地形多样性。
     env_cfg.env.episode_length_s = 20
     env_cfg.env.fail_to_terminal_time_s = 3
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
@@ -90,6 +99,8 @@ def configure_env_for_play(env_cfg):
     env_cfg.terrain.num_cols = 10
     env_cfg.terrain.max_init_terrain_level = env_cfg.terrain.num_rows - 1
     env_cfg.terrain.curriculum = True
+
+    # 关闭训练时常用的噪声和域随机化，使键盘调试时的机器人响应更稳定。
     env_cfg.noise.add_noise = False
     env_cfg.domain_rand.randomize_friction = False
     env_cfg.domain_rand.friction_range = [0.1, 0.2]
@@ -104,6 +115,7 @@ def configure_env_for_play(env_cfg):
     env_cfg.domain_rand.randomize_default_dof_pos = False
     env_cfg.domain_rand.randomize_action_delay = False
 
+    # 固定命令采样范围，后续由键盘事件直接覆盖这些命令值。
     env_cfg.commands.curriculum = False
     env_cfg.commands.heading_command = True
     env_cfg.commands.ranges.lin_vel_x = [
@@ -114,11 +126,16 @@ def configure_env_for_play(env_cfg):
     env_cfg.commands.ranges.height = [DEFAULT_BODY_HEIGHT, DEFAULT_BODY_HEIGHT]
 
 
+# Purpose: 在 Isaac Gym 可视化窗口中注册键盘控制入口，把物理按键转换成后续循环可识别的动作名称。
+# Inputs: env 表示当前仿真环境对象；这里使用它持有的可视化窗口 viewer 来接收键盘输入，并使用它持有的 Isaac Gym 接口完成事件订阅。
 def subscribe_keyboard_events(env):
+    # 只有创建了 viewer 时才能订阅键盘事件；headless 运行时直接提示并跳过。
     if env.viewer is None:
         print("No viewer was created; keyboard input is unavailable.")
         return
 
+    # 将常用移动、转向、高度和重置按键映射为 Isaac Gym viewer action。
+    # 这里的字符串是按键事件的语义标签：例如 W 键被标记为“前进命令”，后续事件处理逻辑会读取这个标签，并据此增加机器人的目标前进速度。
     key_actions = (
         (gymapi.KEY_W, "keyboard_forward"),
         (gymapi.KEY_S, "keyboard_backward"),
@@ -129,15 +146,18 @@ def subscribe_keyboard_events(env):
         (gymapi.KEY_R, "keyboard_reset"),
     )
     for key, action in key_actions:
+        # 订阅后，可视化窗口会在用户按下对应按键时产生带有动作名称的事件；主循环随后查询这些事件，并根据动作名称进入相应的命令更新分支。
         env.gym.subscribe_viewer_keyboard_event(env.viewer, key, action)
 
 
 def apply_keyboard_command(env, command):
+    # commands 的前几维分别写入前进速度、偏航角速度、机体高度和 heading 占位。
     env.commands[:, 0] = command.forward_velocity
     env.commands[:, 1] = command.yaw_rate
     env.commands[:, 2] = command.body_height
     env.commands[:, 3] = 0.0
 
+    # 同步收窄命令范围，避免环境内部重采样把键盘命令覆盖成其他值。
     env.command_ranges["lin_vel_x"][:, 0] = command.forward_velocity
     env.command_ranges["lin_vel_x"][:, 1] = command.forward_velocity
     env.command_ranges["ang_vel_yaw"][:, 0] = command.yaw_rate
@@ -146,12 +166,17 @@ def apply_keyboard_command(env, command):
     env.command_ranges["height"][:, 1] = command.body_height
 
 
+# Purpose: 在键盘命令被修改后，重新生成策略下一次推理要读取的观测，确保观测中的目标速度、目标高度等命令量已经是最新值。
+# Inputs: env 表示当前仿真环境对象；这里会读取它保存的最新机器人状态、键盘命令、观测裁剪范围和历史观测缓存。
+# Outputs: 返回当前普通观测和历史观测；同时会更新环境内部的普通观测缓存，并在存在历史观测缓存时把最新一帧写入历史窗口末尾。
 def refresh_policy_observations(env):
+    # 键盘命令变化后，立即重算策略观测，保证下一次推理能看到最新命令。
     if hasattr(env, "compute_proprioception_observations"):
         clip_obs = env.cfg.normalization.clip_observations
         env.obs_buf = torch.clip(
             env.compute_proprioception_observations(), -clip_obs, clip_obs
         )
+        # 序列策略依赖历史观测，这里只替换最新一帧，保持历史缓冲区结构不变。
         if getattr(env, "obs_history", None) is not None:
             env.obs_history[:, -env.num_obs :] = env.obs_buf
 
@@ -159,6 +184,7 @@ def refresh_policy_observations(env):
 
 
 def print_command_state(key, effect, command):
+    # 每次有效按键后打印本次影响和完整命令状态，方便交互调试。
     print(f"Key '{key}' pressed: {effect}")
     print(
         "Command state -> "
@@ -169,20 +195,24 @@ def print_command_state(key, effect, command):
 
 
 def handle_keyboard_events(env, command):
+    # 读取 viewer 中累积的键盘事件，并把有效事件转换为命令状态变化。
     if env.viewer is None:
         return False
 
     changed = False
     for evt in env.gym.query_viewer_action_events(env.viewer):
+        # 只处理按下事件，忽略释放或无效值，避免一次按键触发两次调整。
         if evt.value <= 0:
             continue
 
+        # 保留 Isaac Gym viewer 的退出和同步切换行为。
         if evt.action == "QUIT":
             sys.exit()
         if evt.action == "toggle_viewer_sync":
             env.enable_viewer_sync = not env.enable_viewer_sync
             continue
 
+        # W/S 调整 x 方向线速度命令，正值为前进，负值为后退。
         if evt.action == "keyboard_forward":
             command.forward_velocity = clamp(
                 command.forward_velocity + FORWARD_VELOCITY_STEP,
@@ -203,6 +233,7 @@ def handle_keyboard_events(env, command):
                 "s", "decreased forward velocity command by -0.10 m/s.", command
             )
             changed = True
+        # A/D 调整偏航角速度命令，用于控制机器人左转或右转。
         elif evt.action == "keyboard_turn_left":
             command.yaw_rate = clamp(
                 command.yaw_rate + YAW_RATE_STEP, YAW_RATE_MIN, YAW_RATE_MAX
@@ -223,6 +254,7 @@ def handle_keyboard_events(env, command):
                 command,
             )
             changed = True
+        # Q/E 调整机体高度命令，用于在允许范围内抬高或降低机器人身体。
         elif evt.action == "keyboard_height_up":
             command.body_height = clamp(
                 command.body_height + BODY_HEIGHT_STEP, BODY_HEIGHT_MIN, BODY_HEIGHT_MAX
@@ -239,18 +271,21 @@ def handle_keyboard_events(env, command):
                 "e", "decreased body height command by -0.03 m.", command
             )
             changed = True
+        # R 将所有键盘命令恢复到默认值。
         elif evt.action == "keyboard_reset":
             command.reset()
             print_command_state("r", "reset all commands to their defaults.", command)
             changed = True
 
     if changed:
+        # 只有命令发生变化时才写回环境，减少无意义的状态更新。
         apply_keyboard_command(env, command)
 
     return changed
 
 
 def print_controls(frame_dir=None):
+    # 启动时输出交互说明，让用户确认 viewer 焦点、按键映射和录制路径。
     print("Keyboard control mode is ready.")
     print("Focus the Isaac Gym viewer before pressing control keys.")
     print("W/S: increase/decrease forward velocity command by 0.10 m/s.")
@@ -267,6 +302,7 @@ def print_controls(frame_dir=None):
 
 
 def update_camera_follow(env, env_cfg, robot_index):
+    # 使用 viewer 配置中的相机偏移量，让相机持续对准指定机器人。
     camera_offset = np.array(env_cfg.viewer.pos, dtype=np.float64)
     target_position = np.array(env.base_position[robot_index, :].to(device="cpu"))
     camera_position = target_position + camera_offset
@@ -275,6 +311,7 @@ def update_camera_follow(env, env_cfg, robot_index):
 
 
 def create_recording_camera(env, env_index):
+    # 为指定环境创建离屏相机，用于按照固定分辨率保存关键帧。
     camera_props = gymapi.CameraProperties()
     camera_props.width = FRAME_CAPTURE_WIDTH
     camera_props.height = FRAME_CAPTURE_HEIGHT
@@ -287,6 +324,7 @@ def create_recording_camera(env, env_index):
 def update_recording_camera(
     env, camera_handle, env_index, camera_position, target_position
 ):
+    # 录制相机跟随当前 viewer 相机位置，保证截取的画面与观察视角一致。
     env.gym.set_camera_location(
         camera_handle,
         env.envs[env_index],
@@ -296,9 +334,11 @@ def update_recording_camera(
 
 
 def play_keyboard(args):
+    # 载入任务配置并改写为适合键盘交互播放的确定性环境设置。
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     configure_env_for_play(env_cfg)
 
+    # 创建环境、选择被相机跟随的机器人，并把初始键盘命令写入环境。
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     camera_robot_index = min(CAMERA_ROBOT_INDEX, env.num_envs - 1)
     command = KeyboardCommand()
@@ -306,6 +346,7 @@ def play_keyboard(args):
     apply_keyboard_command(env, command)
     obs, obs_history = refresh_policy_observations(env)
 
+    # 以 resume 模式加载训练好的 PPO 策略，后续循环只做推理和环境步进。
     train_cfg.runner.resume = True
     ppo_runner, train_cfg = task_registry.make_alg_runner(
         env=env, name=args.task, args=args, train_cfg=train_cfg
@@ -315,6 +356,7 @@ def play_keyboard(args):
     frame_dir = None
     recording_camera = None
     if RECORD_FRAMES:
+        # 截图输出到当前实验日志的 exported 子目录，文件夹名来自命令行参数。
         frame_dir = os.path.join(
             WHEEL_LEGGED_GYM_ROOT_DIR,
             "logs",
@@ -325,6 +367,7 @@ def play_keyboard(args):
         os.makedirs(frame_dir, exist_ok=True)
         recording_camera = create_recording_camera(env, camera_robot_index)
 
+    # 初始化 viewer 相机和录制相机，确保第一帧之前就对准目标机器人。
     print_controls(frame_dir)
     camera_position = np.array(env_cfg.viewer.pos, dtype=np.float64)
     camera_target = np.array(env_cfg.viewer.lookat, dtype=np.float64)
@@ -338,21 +381,26 @@ def play_keyboard(args):
         )
 
     for i in range(1000 * int(env.max_episode_length)):
+        # 每个仿真步前先处理一次按键，让策略推理尽快使用最新命令。
         if handle_keyboard_events(env, command):
             obs, obs_history = refresh_policy_observations(env)
 
+        # 序列策略需要观测历史，普通策略只需要当前观测。
         if ppo_runner.alg.actor_critic.is_sequence:
             actions, _ = policy(obs, obs_history)
         else:
             actions = policy(obs.detach())
 
+        # 在 step 前再次写入命令，抵消环境内部可能发生的命令重采样。
         apply_keyboard_command(env, command)
         obs, _, _, _, _, obs_history = env.step(actions)
         if MOVE_CAMERA:
+            # 仿真推进后更新跟随相机，使视角始终锁定同一个机器人。
             camera_position, camera_target = update_camera_follow(
                 env, env_cfg, camera_robot_index
             )
         if RECORD_FRAMES:
+            # 每隔两个环境步保存一张图，用于后续按 50 FPS 合成视频。
             update_recording_camera(
                 env, recording_camera, camera_robot_index, camera_position, camera_target
             )
@@ -368,11 +416,13 @@ def play_keyboard(args):
                     filename,
                 )
                 img_idx += 1
+        # step 后再处理一次按键，降低交互输入在画面和命令上的延迟。
         if handle_keyboard_events(env, command):
             obs, obs_history = refresh_policy_observations(env)
 
 
 if __name__ == "__main__":
+    # 脚本入口处集中定义播放选项，便于临时调整相机、录制和截图分辨率。
     MOVE_CAMERA = True
     CAMERA_ROBOT_INDEX = 33
     RECORD_FRAMES = True
