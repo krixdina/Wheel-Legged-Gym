@@ -7,7 +7,7 @@ import os
 import sys
 
 import isaacgym
-from isaacgym import gymapi
+from isaacgym import gymapi, gymtorch
 from isaacgym.torch_utils import *
 from wheel_legged_gym import WHEEL_LEGGED_GYM_ROOT_DIR
 from wheel_legged_gym.envs import *
@@ -21,6 +21,8 @@ import torch
 DEFAULT_FORWARD_VELOCITY = 0.0
 DEFAULT_YAW_RATE = 0.0
 DEFAULT_BODY_HEIGHT = 0.15
+DEFAULT_KEYBOARD_TERRAIN = "flat"
+KEYBOARD_TERRAIN_MODES = ("flat", "curriculum")
 
 # 各控制量的步进和边界，避免按键连续输入后命令超出环境可接受范围。
 FORWARD_VELOCITY_STEP = 0.1
@@ -78,6 +80,17 @@ def extract_keyboard_recording_args():
         default=DEFAULT_KEY_FRAME_DIR,
         help="Folder name under logs/<experiment>/exported for saved key-frame images.",
     )
+    parser.add_argument(
+        "--keyboard_terrain",
+        "--keyboard-terrain",
+        dest="keyboard_terrain",
+        choices=KEYBOARD_TERRAIN_MODES,
+        default=DEFAULT_KEYBOARD_TERRAIN,
+        help=(
+            "Terrain layout for keyboard play. Use 'flat' for deterministic "
+            "command tracking, or 'curriculum' to inspect the mixed rough terrains."
+        ),
+    )
     keyboard_args, remaining_argv = parser.parse_known_args()
     sys.argv = [sys.argv[0], *remaining_argv]
     # 输出目录只允许是简单文件夹名，避免意外写到日志目录之外。
@@ -99,15 +112,27 @@ def validate_key_frame_dir(folder_name):
     return folder_name
 
 
-def configure_env_for_play(env_cfg):
-    # 为交互式播放缩短回合、限制并行环境数量，并保留可视化地形多样性。
+def configure_env_for_play(env_cfg, keyboard_terrain=DEFAULT_KEYBOARD_TERRAIN):
+    # 为交互式播放缩短回合、限制并行环境数量，并选择键盘调试使用的地形布局。
     env_cfg.env.episode_length_s = 20
     env_cfg.env.fail_to_terminal_time_s = 3
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
-    env_cfg.terrain.num_rows = 5
-    env_cfg.terrain.num_cols = 10
-    env_cfg.terrain.max_init_terrain_level = env_cfg.terrain.num_rows - 1
-    env_cfg.terrain.curriculum = env_cfg.terrain.mesh_type != "plane"
+    if keyboard_terrain == "flat":
+        env_cfg.terrain.mesh_type = "plane"
+        env_cfg.terrain.num_rows = 1
+        env_cfg.terrain.num_cols = 1
+        env_cfg.terrain.max_init_terrain_level = 0
+        env_cfg.terrain.curriculum = False
+    elif keyboard_terrain == "curriculum":
+        env_cfg.terrain.num_rows = 5
+        env_cfg.terrain.num_cols = 10
+        env_cfg.terrain.max_init_terrain_level = env_cfg.terrain.num_rows - 1
+        env_cfg.terrain.curriculum = env_cfg.terrain.mesh_type != "plane"
+    else:
+        raise ValueError(
+            f"Unsupported keyboard terrain mode '{keyboard_terrain}'. "
+            f"Expected one of {KEYBOARD_TERRAIN_MODES}."
+        )
 
     # 关闭训练时常用的噪声和域随机化，使键盘调试时的机器人响应更稳定。
     env_cfg.noise.add_noise = False
@@ -191,18 +216,77 @@ def apply_keyboard_command(env, command):
 # Purpose: 在键盘命令被修改后，重新生成策略下一次推理要读取的观测，确保观测中的目标速度、目标高度等命令量已经是最新值。
 # Inputs: env 表示当前仿真环境对象；这里会读取它保存的最新机器人状态、键盘命令、观测裁剪范围和历史观测缓存。
 # Outputs: 返回当前普通观测和历史观测；同时会更新环境内部的普通观测缓存，并在存在历史观测缓存时把最新一帧写入历史窗口末尾。
-def refresh_policy_observations(env):
+def refresh_policy_observations(env, reset_history_env_ids=None):
     # 键盘命令变化后，立即重算策略观测，保证下一次推理能看到最新命令。
     if hasattr(env, "compute_proprioception_observations"):
         clip_obs = env.cfg.normalization.clip_observations
         env.obs_buf = torch.clip(
             env.compute_proprioception_observations(), -clip_obs, clip_obs
         )
-        # 序列策略依赖历史观测，这里只替换最新一帧，保持历史缓冲区结构不变。
+        # 序列策略依赖历史观测；普通按键变化只替换最新一帧，reset 后则用干净状态重铺历史。
         if getattr(env, "obs_history", None) is not None:
             env.obs_history[:, -env.num_obs :] = env.obs_buf
+            if reset_history_env_ids is not None and len(reset_history_env_ids) > 0:
+                history_len = getattr(
+                    env, "obs_history_length", env.obs_history.shape[1] // env.num_obs
+                )
+                env.obs_history[reset_history_env_ids] = env.obs_buf[
+                    reset_history_env_ids
+                ].repeat(1, history_len)
 
     return env.get_observations()
+
+
+def stabilize_env_for_keyboard_play(env, command, env_ids=None):
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.long)
+    else:
+        env_ids = env_ids.to(device=env.device, dtype=torch.long).flatten()
+    if len(env_ids) == 0:
+        return env_ids
+
+    env.root_states[env_ids, 7:13] = 0.0
+    env.dof_vel[env_ids] = 0.0
+    for buffer_name in ("actions", "last_actions", "action_fifo"):
+        buffer = getattr(env, buffer_name, None)
+        if buffer is not None:
+            buffer[env_ids] = 0.0
+
+    env_ids_int32 = env_ids.to(dtype=torch.int32)
+    env.gym.set_actor_root_state_tensor_indexed(
+        env.sim,
+        gymtorch.unwrap_tensor(env.root_states),
+        gymtorch.unwrap_tensor(env_ids_int32),
+        len(env_ids_int32),
+    )
+    env.gym.set_dof_state_tensor_indexed(
+        env.sim,
+        gymtorch.unwrap_tensor(env.dof_state),
+        gymtorch.unwrap_tensor(env_ids_int32),
+        len(env_ids_int32),
+    )
+    env.gym.refresh_actor_root_state_tensor(env.sim)
+    env.gym.refresh_dof_state_tensor(env.sim)
+
+    if hasattr(env, "leg_post_physics_step"):
+        env.leg_post_physics_step()
+    if hasattr(env, "base_lin_vel"):
+        env.base_lin_vel[env_ids] = 0.0
+    if hasattr(env, "base_ang_vel"):
+        env.base_ang_vel[env_ids] = 0.0
+    if hasattr(env, "dof_acc"):
+        env.dof_acc[env_ids] = 0.0
+    if hasattr(env, "last_base_position"):
+        env.last_base_position[env_ids] = env.root_states[env_ids, :3]
+    if hasattr(env, "last_dof_vel"):
+        env.last_dof_vel[env_ids] = env.dof_vel[env_ids]
+    if hasattr(env, "last_dof_pos"):
+        env.last_dof_pos[env_ids] = env.dof_pos[env_ids]
+    if hasattr(env, "last_root_vel"):
+        env.last_root_vel[env_ids] = env.root_states[env_ids, 7:13]
+
+    apply_keyboard_command(env, command)
+    return env_ids
 
 
 def print_command_state(key, effect, command):
@@ -309,7 +393,7 @@ def process_keyboard_event(env, command, evt):
     return False, False
 
 
-def print_controls(frame_dir=None):
+def print_controls(keyboard_terrain, frame_dir=None):
     # 启动时输出交互说明，让用户确认 viewer 焦点、按键映射和录制路径。
     print("Keyboard control mode is ready.")
     print("Focus the Isaac Gym viewer before pressing control keys.")
@@ -317,6 +401,7 @@ def print_controls(frame_dir=None):
     print("A/D: increase/decrease yaw rate command by 0.10 rad/s.")
     print("Q/E: increase/decrease body height command by 0.03 m.")
     print("R: reset all commands.")
+    print(f"Keyboard terrain mode: {keyboard_terrain}.")
     if RECORD_FRAMES:
         print(
             f"Frames will be saved every 2 environment steps at "
@@ -361,7 +446,8 @@ def update_recording_camera(
 def play_keyboard(args):
     # 载入任务配置并改写为适合键盘交互播放的确定性环境设置。
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
-    configure_env_for_play(env_cfg)
+    keyboard_terrain = getattr(args, "keyboard_terrain", DEFAULT_KEYBOARD_TERRAIN)
+    configure_env_for_play(env_cfg, keyboard_terrain)
 
     # 创建环境、选择被相机跟随的机器人，并把初始键盘命令写入环境。
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
@@ -377,8 +463,8 @@ def play_keyboard(args):
         env=env, name=args.task, args=args, train_cfg=train_cfg
     )
     policy = ppo_runner.get_inference_policy(device=env.device)
-    apply_keyboard_command(env, command)
-    obs, obs_history = refresh_policy_observations(env)
+    stabilized_env_ids = stabilize_env_for_keyboard_play(env, command)
+    obs, obs_history = refresh_policy_observations(env, stabilized_env_ids)
     img_idx = 0
     frame_dir = None
     recording_camera = None
@@ -395,7 +481,7 @@ def play_keyboard(args):
         recording_camera = create_recording_camera(env, camera_robot_index)
 
     # 初始化 viewer 相机和录制相机，确保第一帧之前就对准目标机器人。
-    print_controls(frame_dir)
+    print_controls(keyboard_terrain, frame_dir)
     camera_position = np.array(env_cfg.viewer.pos, dtype=np.float64)
     camera_target = np.array(env_cfg.viewer.lookat, dtype=np.float64)
     if MOVE_CAMERA:
@@ -421,7 +507,13 @@ def play_keyboard(args):
 
         # 在 step 前再次写入命令，抵消环境内部可能发生的命令重采样。
         apply_keyboard_command(env, command)
-        obs, _, _, _, _, obs_history = env.step(actions)
+        obs, _, _, dones, _, obs_history = env.step(actions)
+        done_env_ids = dones.nonzero(as_tuple=False).flatten()
+        if len(done_env_ids) > 0:
+            stabilized_env_ids = stabilize_env_for_keyboard_play(
+                env, command, done_env_ids
+            )
+            obs, obs_history = refresh_policy_observations(env, stabilized_env_ids)
         # step 内部可能触发 reset 或命令重采样；立刻恢复键盘命令并刷新下一次推理的观测。
         apply_keyboard_command(env, command)
         obs, obs_history = refresh_policy_observations(env)
@@ -463,4 +555,5 @@ if __name__ == "__main__":
     keyboard_args = extract_keyboard_recording_args()
     args = get_args()
     args.key_frame_dir = keyboard_args.key_frame_dir
+    args.keyboard_terrain = keyboard_args.keyboard_terrain
     play_keyboard(args)
