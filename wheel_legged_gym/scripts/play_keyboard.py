@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import argparse
 import os
 import sys
+import time
 
 import isaacgym
 from isaacgym import gymapi
@@ -21,6 +22,7 @@ import torch
 DEFAULT_FORWARD_VELOCITY = 0.0
 DEFAULT_YAW_RATE = 0.0
 DEFAULT_BODY_HEIGHT = 0.15
+COMMAND_EPSILON = 1e-6
 
 # 各控制量的步进和边界，避免按键连续输入后命令超出环境可接受范围。
 FORWARD_VELOCITY_STEP = 0.1
@@ -36,6 +38,7 @@ BODY_HEIGHT_MIN = 0.15
 BODY_HEIGHT_MAX = 0.32
 
 DEFAULT_KEY_FRAME_DIR = "keyboard_frames"
+IDLE_SETTLE_TIME_S = 0.25
 KEYBOARD_ACTION_NAMES = {
     "keyboard_forward",
     "keyboard_backward",
@@ -59,6 +62,13 @@ class KeyboardCommand:
         self.forward_velocity = DEFAULT_FORWARD_VELOCITY
         self.yaw_rate = DEFAULT_YAW_RATE
         self.body_height = DEFAULT_BODY_HEIGHT
+
+    def is_idle(self):
+        return (
+            abs(self.forward_velocity - DEFAULT_FORWARD_VELOCITY) < COMMAND_EPSILON
+            and abs(self.yaw_rate - DEFAULT_YAW_RATE) < COMMAND_EPSILON
+            and abs(self.body_height - DEFAULT_BODY_HEIGHT) < COMMAND_EPSILON
+        )
 
 
 def clamp(value, lower, upper):
@@ -358,6 +368,13 @@ def update_recording_camera(
     )
 
 
+def render_idle_frame(env, command):
+    # 空闲时只刷新 viewer 和键盘事件，避免策略长时间在零速度命令下进入难以起步的静止状态。
+    env.render()
+    apply_keyboard_command(env, command)
+    time.sleep(env.dt)
+
+
 def play_keyboard(args):
     # 载入任务配置并改写为适合键盘交互播放的确定性环境设置。
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
@@ -407,11 +424,25 @@ def play_keyboard(args):
             env, recording_camera, camera_robot_index, camera_position, camera_target
         )
 
+    idle_settle_steps = 0
+    idle_settle_steps_after_motion = max(1, int(IDLE_SETTLE_TIME_S / env.dt))
+
     for i in range(1000 * int(env.max_episode_length)):
         # 每个仿真步前先处理一次按键，让策略推理尽快使用最新命令。
         handle_keyboard_events(env, command)
         apply_keyboard_command(env, command)
         obs, obs_history = refresh_policy_observations(env)
+
+        if env.viewer is not None and command.is_idle():
+            if idle_settle_steps <= 0:
+                render_idle_frame(env, command)
+                obs, obs_history = refresh_policy_observations(env)
+                if command.is_idle():
+                    continue
+            else:
+                idle_settle_steps -= 1
+        else:
+            idle_settle_steps = idle_settle_steps_after_motion
 
         # 序列策略需要观测历史，普通策略只需要当前观测。
         if ppo_runner.alg.actor_critic.is_sequence:
