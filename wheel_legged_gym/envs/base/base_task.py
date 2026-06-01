@@ -211,8 +211,16 @@ class BaseTask:
 
             # 处理窗口输入事件：
             # 关闭命令会直接终止程序，切换命令会改变“画面是否跟随仿真同步刷新”的开关状态。
+            # 交互式脚本可以挂载 viewer_action_callback，把自定义按键也放到同一个
+            # 事件消费点处理，避免 query_viewer_action_events() 被多处调用后丢事件。
             # check for keyboard events
+            viewer_action_callback = getattr(self, "viewer_action_callback", None)
             for evt in self.gym.query_viewer_action_events(self.viewer):
+                if (
+                    viewer_action_callback is not None
+                    and viewer_action_callback(evt)
+                ):
+                    continue
                 if evt.action == "QUIT" and evt.value > 0:
                     sys.exit()
                 elif evt.action == "toggle_viewer_sync" and evt.value > 0:

@@ -36,6 +36,15 @@ BODY_HEIGHT_MIN = 0.15
 BODY_HEIGHT_MAX = 0.32
 
 DEFAULT_KEY_FRAME_DIR = "keyboard_frames"
+KEYBOARD_ACTION_NAMES = {
+    "keyboard_forward",
+    "keyboard_backward",
+    "keyboard_turn_left",
+    "keyboard_turn_right",
+    "keyboard_height_up",
+    "keyboard_height_down",
+    "keyboard_reset",
+}
 
 
 # 保存当前键盘命令状态，后续会同步写入环境的 commands 和 command_ranges。
@@ -98,7 +107,7 @@ def configure_env_for_play(env_cfg):
     env_cfg.terrain.num_rows = 5
     env_cfg.terrain.num_cols = 10
     env_cfg.terrain.max_init_terrain_level = env_cfg.terrain.num_rows - 1
-    env_cfg.terrain.curriculum = True
+    env_cfg.terrain.curriculum = env_cfg.terrain.mesh_type != "plane"
 
     # 关闭训练时常用的噪声和域随机化，使键盘调试时的机器人响应更稳定。
     env_cfg.noise.add_noise = False
@@ -117,7 +126,7 @@ def configure_env_for_play(env_cfg):
 
     # 固定命令采样范围，后续由键盘事件直接覆盖这些命令值。
     env_cfg.commands.curriculum = False
-    env_cfg.commands.heading_command = True
+    env_cfg.commands.heading_command = False
     env_cfg.commands.ranges.lin_vel_x = [
         DEFAULT_FORWARD_VELOCITY,
         DEFAULT_FORWARD_VELOCITY,
@@ -148,6 +157,19 @@ def subscribe_keyboard_events(env):
     for key, action in key_actions:
         # 订阅后，可视化窗口会在用户按下对应按键时产生带有动作名称的事件；主循环随后查询这些事件，并根据动作名称进入相应的命令更新分支。
         env.gym.subscribe_viewer_keyboard_event(env.viewer, key, action)
+
+
+def install_keyboard_event_callback(env, command):
+    if env.viewer is None:
+        return
+
+    def handle_event_from_render(evt):
+        handled, changed = process_keyboard_event(env, command, evt)
+        if changed:
+            apply_keyboard_command(env, command)
+        return handled
+
+    env.viewer_action_callback = handle_event_from_render
 
 
 def apply_keyboard_command(env, command):
@@ -201,87 +223,90 @@ def handle_keyboard_events(env, command):
 
     changed = False
     for evt in env.gym.query_viewer_action_events(env.viewer):
-        # 只处理按下事件，忽略释放或无效值，避免一次按键触发两次调整。
-        if evt.value <= 0:
-            continue
-
-        # 保留 Isaac Gym viewer 的退出和同步切换行为。
-        if evt.action == "QUIT":
-            sys.exit()
-        if evt.action == "toggle_viewer_sync":
-            env.enable_viewer_sync = not env.enable_viewer_sync
-            continue
-
-        # W/S 调整 x 方向线速度命令，正值为前进，负值为后退。
-        if evt.action == "keyboard_forward":
-            command.forward_velocity = clamp(
-                command.forward_velocity + FORWARD_VELOCITY_STEP,
-                FORWARD_VELOCITY_MIN,
-                FORWARD_VELOCITY_MAX,
-            )
-            print_command_state(
-                "w", "increased forward velocity command by +0.10 m/s.", command
-            )
-            changed = True
-        elif evt.action == "keyboard_backward":
-            command.forward_velocity = clamp(
-                command.forward_velocity - FORWARD_VELOCITY_STEP,
-                FORWARD_VELOCITY_MIN,
-                FORWARD_VELOCITY_MAX,
-            )
-            print_command_state(
-                "s", "decreased forward velocity command by -0.10 m/s.", command
-            )
-            changed = True
-        # A/D 调整偏航角速度命令，用于控制机器人左转或右转。
-        elif evt.action == "keyboard_turn_left":
-            command.yaw_rate = clamp(
-                command.yaw_rate + YAW_RATE_STEP, YAW_RATE_MIN, YAW_RATE_MAX
-            )
-            print_command_state(
-                "a",
-                "increased yaw rate command for a left turn by +0.10 rad/s.",
-                command,
-            )
-            changed = True
-        elif evt.action == "keyboard_turn_right":
-            command.yaw_rate = clamp(
-                command.yaw_rate - YAW_RATE_STEP, YAW_RATE_MIN, YAW_RATE_MAX
-            )
-            print_command_state(
-                "d",
-                "decreased yaw rate command for a right turn by -0.10 rad/s.",
-                command,
-            )
-            changed = True
-        # Q/E 调整机体高度命令，用于在允许范围内抬高或降低机器人身体。
-        elif evt.action == "keyboard_height_up":
-            command.body_height = clamp(
-                command.body_height + BODY_HEIGHT_STEP, BODY_HEIGHT_MIN, BODY_HEIGHT_MAX
-            )
-            print_command_state(
-                "q", "increased body height command by +0.03 m.", command
-            )
-            changed = True
-        elif evt.action == "keyboard_height_down":
-            command.body_height = clamp(
-                command.body_height - BODY_HEIGHT_STEP, BODY_HEIGHT_MIN, BODY_HEIGHT_MAX
-            )
-            print_command_state(
-                "e", "decreased body height command by -0.03 m.", command
-            )
-            changed = True
-        # R 将所有键盘命令恢复到默认值。
-        elif evt.action == "keyboard_reset":
-            command.reset()
-            print_command_state("r", "reset all commands to their defaults.", command)
-            changed = True
+        _, event_changed = process_keyboard_event(env, command, evt)
+        changed = changed or event_changed
 
     if changed:
         # 只有命令发生变化时才写回环境，减少无意义的状态更新。
         apply_keyboard_command(env, command)
 
     return changed
+
+
+def process_keyboard_event(env, command, evt):
+    # 只处理按下事件，忽略释放或无效值，避免一次按键触发两次调整。
+    if evt.value <= 0:
+        return evt.action in KEYBOARD_ACTION_NAMES, False
+
+    # 保留 Isaac Gym viewer 的退出和同步切换行为。
+    if evt.action == "QUIT":
+        sys.exit()
+    if evt.action == "toggle_viewer_sync":
+        env.enable_viewer_sync = not env.enable_viewer_sync
+        return True, False
+
+    # W/S 调整 x 方向线速度命令，正值为前进，负值为后退。
+    if evt.action == "keyboard_forward":
+        command.forward_velocity = clamp(
+            command.forward_velocity + FORWARD_VELOCITY_STEP,
+            FORWARD_VELOCITY_MIN,
+            FORWARD_VELOCITY_MAX,
+        )
+        print_command_state(
+            "w", "increased forward velocity command by +0.10 m/s.", command
+        )
+        return True, True
+    if evt.action == "keyboard_backward":
+        command.forward_velocity = clamp(
+            command.forward_velocity - FORWARD_VELOCITY_STEP,
+            FORWARD_VELOCITY_MIN,
+            FORWARD_VELOCITY_MAX,
+        )
+        print_command_state(
+            "s", "decreased forward velocity command by -0.10 m/s.", command
+        )
+        return True, True
+    # A/D 调整偏航角速度命令，用于控制机器人左转或右转。
+    if evt.action == "keyboard_turn_left":
+        command.yaw_rate = clamp(
+            command.yaw_rate + YAW_RATE_STEP, YAW_RATE_MIN, YAW_RATE_MAX
+        )
+        print_command_state(
+            "a",
+            "increased yaw rate command for a left turn by +0.10 rad/s.",
+            command,
+        )
+        return True, True
+    if evt.action == "keyboard_turn_right":
+        command.yaw_rate = clamp(
+            command.yaw_rate - YAW_RATE_STEP, YAW_RATE_MIN, YAW_RATE_MAX
+        )
+        print_command_state(
+            "d",
+            "decreased yaw rate command for a right turn by -0.10 rad/s.",
+            command,
+        )
+        return True, True
+    # Q/E 调整机体高度命令，用于在允许范围内抬高或降低机器人身体。
+    if evt.action == "keyboard_height_up":
+        command.body_height = clamp(
+            command.body_height + BODY_HEIGHT_STEP, BODY_HEIGHT_MIN, BODY_HEIGHT_MAX
+        )
+        print_command_state("q", "increased body height command by +0.03 m.", command)
+        return True, True
+    if evt.action == "keyboard_height_down":
+        command.body_height = clamp(
+            command.body_height - BODY_HEIGHT_STEP, BODY_HEIGHT_MIN, BODY_HEIGHT_MAX
+        )
+        print_command_state("e", "decreased body height command by -0.03 m.", command)
+        return True, True
+    # R 将所有键盘命令恢复到默认值。
+    if evt.action == "keyboard_reset":
+        command.reset()
+        print_command_state("r", "reset all commands to their defaults.", command)
+        return True, True
+
+    return False, False
 
 
 def print_controls(frame_dir=None):
@@ -343,8 +368,8 @@ def play_keyboard(args):
     camera_robot_index = min(CAMERA_ROBOT_INDEX, env.num_envs - 1)
     command = KeyboardCommand()
     subscribe_keyboard_events(env)
+    install_keyboard_event_callback(env, command)
     apply_keyboard_command(env, command)
-    obs, obs_history = refresh_policy_observations(env)
 
     # 以 resume 模式加载训练好的 PPO 策略，后续循环只做推理和环境步进。
     train_cfg.runner.resume = True
@@ -352,6 +377,8 @@ def play_keyboard(args):
         env=env, name=args.task, args=args, train_cfg=train_cfg
     )
     policy = ppo_runner.get_inference_policy(device=env.device)
+    apply_keyboard_command(env, command)
+    obs, obs_history = refresh_policy_observations(env)
     img_idx = 0
     frame_dir = None
     recording_camera = None
@@ -382,8 +409,9 @@ def play_keyboard(args):
 
     for i in range(1000 * int(env.max_episode_length)):
         # 每个仿真步前先处理一次按键，让策略推理尽快使用最新命令。
-        if handle_keyboard_events(env, command):
-            obs, obs_history = refresh_policy_observations(env)
+        handle_keyboard_events(env, command)
+        apply_keyboard_command(env, command)
+        obs, obs_history = refresh_policy_observations(env)
 
         # 序列策略需要观测历史，普通策略只需要当前观测。
         if ppo_runner.alg.actor_critic.is_sequence:
@@ -394,6 +422,9 @@ def play_keyboard(args):
         # 在 step 前再次写入命令，抵消环境内部可能发生的命令重采样。
         apply_keyboard_command(env, command)
         obs, _, _, _, _, obs_history = env.step(actions)
+        # step 内部可能触发 reset 或命令重采样；立刻恢复键盘命令并刷新下一次推理的观测。
+        apply_keyboard_command(env, command)
+        obs, obs_history = refresh_policy_observations(env)
         if MOVE_CAMERA:
             # 仿真推进后更新跟随相机，使视角始终锁定同一个机器人。
             camera_position, camera_target = update_camera_follow(
@@ -418,6 +449,7 @@ def play_keyboard(args):
                 img_idx += 1
         # step 后再处理一次按键，降低交互输入在画面和命令上的延迟。
         if handle_keyboard_events(env, command):
+            apply_keyboard_command(env, command)
             obs, obs_history = refresh_policy_observations(env)
 
 
