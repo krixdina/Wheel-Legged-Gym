@@ -209,11 +209,14 @@ class BaseTask:
             if self.gym.query_viewer_has_closed(self.viewer):
                 sys.exit()
 
-            # 处理窗口输入事件：
-            # 关闭命令会直接终止程序，切换命令会改变“画面是否跟随仿真同步刷新”的开关状态。
-            # 交互式脚本可以挂载 viewer_action_callback，把自定义按键也放到同一个
-            # 事件消费点处理，避免 query_viewer_action_events() 被多处调用后丢事件。
             # check for keyboard events
+            # 
+            # 注意：query_viewer_action_events() 不是“查看”事件，而是会把 viewer 事件队列中的事件取走。
+            # play_keyboard.py 注册的 W/A/S/D/Q/E/R 等自定义事件也会出现在同一个队列里。
+            # 如果 render() 在这里先取到了 keyboard_forward 这类事件，但不交给 play_keyboard.py 处理，
+            # 后续 play_keyboard.py 再查询事件队列时就读不到这个按键，表现为按键偶尔无效。
+            # viewer_action_callback 的作用是让交互脚本在 render() 这个最早处理事件的位置接管自定义事件；
+            # callback 返回 True 表示该事件已经被交互脚本处理，跳过下面的默认 QUIT/V 逻辑。
             viewer_action_callback = getattr(self, "viewer_action_callback", None)
             for evt in self.gym.query_viewer_action_events(self.viewer):
                 if (
