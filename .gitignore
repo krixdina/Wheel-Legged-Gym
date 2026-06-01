@@ -62,3 +62,6 @@ runs
 *.egg-info
 __pycache__
 wheel-legged-reference/
+
+# MuJoCo runtime log
+MUJOCO_LOG.TXT
