@@ -3,7 +3,7 @@
   <compiler angle="radian" autolimits="true" balanceinertia="true" meshdir="/home/kristina/bachelor-design-projects/Wheel-Legged-Gym/resources/robots/wheel_legged_fyt/meshes"/>
   <option gravity="0 0 -9.81" integrator="Euler" timestep="0.005"/>
   <asset>
-    <mesh file="/home/kristina/bachelor-design-projects/Wheel-Legged-Gym/sim2sim/model/meshes/base_link_decimated.obj" name="base_link"/>
+    <mesh file="base_link.STL" name="base_link"/>
     <mesh file="left_thigh_link.STL" name="left_thigh_link"/>
     <mesh file="left_leg_link.STL" name="left_leg_link"/>
     <mesh file="left_wheel_link.STL" name="left_wheel_link"/>

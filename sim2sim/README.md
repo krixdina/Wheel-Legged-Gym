@@ -73,8 +73,10 @@ conda run -n isaac_gym python sim2sim/scripts/build_mjcf.py
 - **历史观测**：5 帧滑动窗口（135 维）输入 encoder 估计 latent（含机体线速度）。
 - **控制律**：动作 -> theta0/L0/轮速参考 -> 阻抗 PD + VMC 闭式雅可比 -> 6 关节力矩，
   左腿镜像取负。几何 l1=0.21, l2=0.25, offset=0。
-- **MJCF 取舍**：轮子碰撞用实测圆柱（r=0.0579, 半宽0.019）；base_link 原 STL 过大
-  （>20万面）改用 box 碰撞 + 半透明 box 可视化；其余连杆用 mesh。
+- **MJCF 取舍**：轮子碰撞用实测圆柱（r=0.0579, 半宽0.019）；base_link 视觉用真实
+  mesh（原 STL 106 万面超过 MuJoCo 20 万上限，已用 MeshLab 减面到 19 万面），但
+  碰撞仍用不可见 box（mesh 碰撞会被转成凸包裹住腿部关节）；其余连杆视觉+碰撞均用
+  mesh。
 
 ## 注意
 

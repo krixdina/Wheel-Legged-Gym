@@ -29,16 +29,13 @@ WHEEL_RADIUS = 0.0579
 WHEEL_HALF_WIDTH = 0.019
 WHEEL_LINKS = {"left_wheel_link", "right_wheel_link"}
 
-# base_link.STL has ~1.06M faces (53 MB) and is rejected by the MuJoCo loader
-# (200k-face cap). For a faithful demo video we keep the real chassis shape as
-# the VISUAL geom, using a decimated copy (decimate_base_mesh.py -> ~80k faces).
-# COLLISION stays a box primitive: it is never rendered, self-collision is off
-# in training, and a convex hull of the real mesh would swallow the leg joints.
-# The box is sized/centred from the measured mesh bounds (0.60 x 0.39 x 0.47,
-# centroid z=0.215 relative to the link origin).
-BASE_VISUAL_MESH = os.path.join(
-    REPO_ROOT, "sim2sim/model/meshes/base_link_decimated.obj"
-)
+# base_link.STL was decimated in place (via MeshLab) to 190k faces, now within
+# MuJoCo's 200k-face cap, so its real shape loads directly through meshdir like
+# every other link -- no separate decimated copy is needed.
+# COLLISION still uses a box primitive: it is never rendered, self-collision is
+# off in training, and a convex hull of the real mesh would swallow the leg
+# joints. The box is sized/centred from the measured mesh bounds
+# (0.60 x 0.39 x 0.47, centroid z=0.215 relative to the link origin).
 BASE_BOX_HALF = "0.30 0.196 0.236"
 BASE_BOX_POS = "0 0 0.215"
 
@@ -173,11 +170,9 @@ def build():
     # Mesh assets + ground texture/material.
     asset = ET.SubElement(mujoco, "asset")
     for name, info in links.items():
-        if name == "base_link":
-            # Real (decimated) chassis mesh, referenced by absolute path so it
-            # can live outside meshdir.
-            ET.SubElement(asset, "mesh", name="base_link", file=BASE_VISUAL_MESH)
-        elif info["mesh"] is not None:
+        # All links (including the decimated base_link) load their STL from
+        # meshdir by file name.
+        if info["mesh"] is not None:
             ET.SubElement(asset, "mesh", name=name, file=info["mesh"])
     ET.SubElement(
         asset, "texture", name="grid", type="2d", builtin="checker",
