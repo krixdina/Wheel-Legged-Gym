@@ -2,17 +2,25 @@
 
 Only the encoder and actor are needed for deployment (the critic is training
 only). This rebuilds those two MLPs with the exact layer widths from
-sim2sim_config (verified against model_8000.pt) and loads the matching weights
-out of the checkpoint's model_state_dict.
+config/sim2sim.yaml (verified against model_8000.pt) and loads the matching
+weights out of the checkpoint's model_state_dict.
 
 Inference mirrors ActorCriticSequence.act_inference():
     latent  = encoder(observation_history)          # estimates base lin vel etc.
     action  = actor(cat(observation, latent))        # deterministic mean action
 """
+from pathlib import Path
+
 import torch
 import torch.nn as nn
+import yaml
 
-import sim2sim_config as C
+
+CONFIG_PATH = Path(__file__).with_name("config") / "sim2sim.yaml"
+with CONFIG_PATH.open("r", encoding="utf-8") as f:
+    CONFIG = yaml.safe_load(f)
+
+network = CONFIG["network"]
 
 
 def _activation(name):
@@ -45,13 +53,16 @@ class SequencePolicy:
 
     def __init__(self, checkpoint_path, device="cpu"):
         self.device = torch.device(device)
-        act = _activation(C.ACTIVATION)
+        act = _activation(network["activation"])
 
         self.encoder = _build_mlp(
-            C.NUM_ENCODER_OBS, C.ENCODER_HIDDEN_DIMS, C.LATENT_DIM, act
+            network["num_encoder_obs"], network["encoder_hidden_dims"], network["latent_dim"], act
         ).to(self.device)
         self.actor = _build_mlp(
-            C.NUM_OBS + C.LATENT_DIM, C.ACTOR_HIDDEN_DIMS, C.NUM_ACTIONS, act
+            network["num_obs"] + network["latent_dim"],
+            network["actor_hidden_dims"],
+            network["num_actions"],
+            act,
         ).to(self.device)
 
         state = torch.load(checkpoint_path, map_location=self.device)["model_state_dict"]

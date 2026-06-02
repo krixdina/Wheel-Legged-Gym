@@ -15,7 +15,6 @@ sim2sim/
 │   ├── build_mjcf.py          # URDF -> MJCF 转换（一次性）
 │   ├── config/
 │   │   └── sim2sim.yaml       # 所有冻结参数（与训练快照逐项核对）
-│   ├── sim2sim_config.py      # 读取 YAML 并导出部署脚本使用的兼容常量
 │   ├── policy.py              # 加载 .pt，重建 encoder+actor 做推理
 │   ├── wl_controller.py       # VMC/五连杆FK/PD 控制律（numpy 版，对齐训练代码）
 │   └── play_mujoco.py         # 主验证脚本
