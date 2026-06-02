@@ -63,7 +63,10 @@ class KeyboardCommand:
         self.yaw_rate = DEFAULT_YAW_RATE
         self.body_height = DEFAULT_BODY_HEIGHT
 
+    # Purpose: 判断当前键盘命令是否已经回到默认静止状态，供主循环决定是否跳过策略推理并只刷新空闲画面。
+    # Outputs: 返回布尔结果；True 表示三个手动控制量都与默认值足够接近，此时可把当前状态视为没有人工运动命令。
     def is_idle(self):
+        # 分别比较目标前进速度、目标偏航角速度和目标机体高度与脚本默认命令的差值。
         return (
             abs(self.forward_velocity - DEFAULT_FORWARD_VELOCITY) < COMMAND_EPSILON
             and abs(self.yaw_rate - DEFAULT_YAW_RATE) < COMMAND_EPSILON
@@ -168,17 +171,21 @@ def subscribe_keyboard_events(env):
         # 订阅后，可视化窗口会在用户按下对应按键时产生带有动作名称的事件；主循环随后查询这些事件，并根据动作名称进入相应的命令更新分支。
         env.gym.subscribe_viewer_keyboard_event(env.viewer, key, action)
 
-
+# Purpose: 把键盘控制脚本的事件处理逻辑挂到环境渲染流程上，避免 base_task 中的 render() 函数先取走按键事件后主循环再也读不到这些事件。
+# Inputs: env 表示当前仿真环境对象，它持有可视化窗口和 Isaac Gym 按键事件队列；command 表示当前键盘命令状态对象，用来保存目标前进速度、目标偏航角速度和目标机体高度。
+# Outputs: 这个函数没有显式返回值；它会在环境对象上放置 viewer_action_callback 回调，使 BaseTask.render() 在读取 viewer 事件时可以把键盘控制事件交回 play_keyboard.py 处理。
 def install_keyboard_event_callback(env, command):
     if env.viewer is None:
         return
 
     def handle_event_from_render(evt):
+        # BaseTask.render() 读取到的 evt 表示一个 viewer 键盘事件；这里立即复用统一的键盘事件处理逻辑，并在命令被改变后写回仿真环境。
         handled, changed = process_keyboard_event(env, command, evt)
         if changed:
             apply_keyboard_command(env, command)
         return handled
 
+    # 在环境对象上保存回调后，BaseTask.render() 会优先调用它；返回 True 的事件会被视为已处理，不再落入默认退出或同步切换逻辑。
     env.viewer_action_callback = handle_event_from_render
 
 
@@ -242,7 +249,11 @@ def handle_keyboard_events(env, command):
 
     return changed
 
-
+# process_keyboard_event() 实际返回两个值：
+#     return handled, changed
+# 含义大概是：
+# handled：这个事件是不是本脚本认识的事件，比如 W/A/S/D/Q/E/R、退出、切换同步等。
+# changed：这个事件有没有真的改变 command，比如前进速度、偏航角速度、机体高度是否被修改。
 def process_keyboard_event(env, command, evt):
     # 只处理按下事件，忽略释放或无效值，避免一次按键触发两次调整。
     if evt.value <= 0:

@@ -1,4 +1,4 @@
-"""Sim2sim验证 entry point: run the trained FYT policy inside MuJoCo.
+"""Sim2sim entry point: run the trained policy inside MuJoCo.
 
 Pipeline per policy step (100 Hz):
     1. read MuJoCo state -> base ang vel / projected gravity / joint pos,vel
@@ -8,11 +8,6 @@ Pipeline per policy step (100 Hz):
     5. controller: action -> 6 joint torques (VMC + PD)
     6. apply torques for DECIMATION physics steps (200 Hz)
 
-Usage:
-    conda run -n isaac_gym python sim2sim/scripts/play_mujoco.py            # viewer
-    conda run -n isaac_gym python sim2sim/scripts/play_mujoco.py --headless --seconds 5
-    ... --vx 0.5 --wz 0.0 --height 0.18   # constant command
-
 Run from the repo root (the script also fixes sys.path to its own dir).
 """
 import argparse
@@ -21,8 +16,10 @@ import sys
 import time
 from pathlib import Path
 
+# 确保从任何工作目录运行时都能正确导入 policy.py 和 wl_controller.py
+# 如果运行 python sim2sim/scripts/play_mujoco.py 那么 python 会自动加载 sim2sim/scripts/policy_mujoco.py 这个文件，
+# 并在全局作用域中自动提供 __file__ = "sim2sim/scripts/play_mujoco.py"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 import numpy as np
 import mujoco
 import yaml
@@ -45,22 +42,30 @@ default_command = CONFIG["default_command"]
 safety = CONFIG["safety"]
 logging_config = CONFIG["logging"]
 
-# MuJoCo qpos layout for a freejoint base: [x y z | qw qx qy qz | 6 joints].
-# Joint dof order in qpos[7:] / qvel[6:] matches the MJCF joint order, which the
-# builder wrote in URDF order = Isaac Gym DOF order.
+# MuJoCo qpos stores generalized positions:
+# [base_x, base_y, base_z, base_qw, base_qx, base_qy, base_qz,
+#  left_thigh_pos, left_leg_pos, left_wheel_pos, right_thigh_pos, right_leg_pos, right_wheel_pos].
+# MuJoCo qvel stores generalized velocities:
+# [base_vx, base_vy, base_vz, base_wx, base_wy, base_wz,
+#  left_thigh_vel, left_leg_vel, left_wheel_vel, right_thigh_vel, right_leg_vel, right_wheel_vel].
+#
+# build_mjcf.py writes the six MJCF hinge joints in the same order as the URDF:
+# [left_thigh, left_leg, left_wheel, right_thigh, right_leg, right_wheel].
+# MuJoCo then stores qpos[7:] and qvel[6:] in this MJCF joint order, so these
+# slices have the same DOF order as Isaac Gym.
 QPOS_JOINT_START = 7
 QVEL_JOINT_START = 6
 
 
+# Purpose: 将世界坐标系下的三维向量旋转到机器人机体坐标系，用于构造与 Isaac Gym 训练侧一致的角速度和重力方向观测。
+# Inputs: quat_wxyz 表示 MuJoCo 提供的基座姿态四元数，排列顺序是 [w, x, y, z]；vec 表示需要从世界坐标系变换到机体系的三维向量。
+# Outputs: 返回旋转后的三维向量，其物理含义是同一个向量在 base_link 机体坐标系下的表达。
 def quat_rotate_inverse_wxyz(quat_wxyz, vec):
-    """Rotate vec by the inverse of quat (MuJoCo [w,x,y,z]).
-
-    Reproduces isaacgym.torch_utils.quat_rotate_inverse, which expects [x,y,z,w];
-    here we unpack MuJoCo's [w,x,y,z] directly into the same formula.
-    """
+    # 将 MuJoCo 四元数拆成标量部分和向量部分；这里的四元数顺序是 [w, x, y, z]，而训练侧工具函数内部使用的是标量和向量分开的公式。
     w, x, y, z = quat_wxyz
     q_vec = np.array([x, y, z])
     q_w = w
+    # 使用四元数逆旋转的闭式公式计算结果，避免在部署循环中创建额外的旋转矩阵。
     a = vec * (2.0 * q_w ** 2 - 1.0)
     b = np.cross(q_vec, vec) * q_w * 2.0
     c = q_vec * (q_vec @ vec) * 2.0
@@ -70,7 +75,7 @@ def quat_rotate_inverse_wxyz(quat_wxyz, vec):
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--headless", action="store_true", help="run without viewer")
-    p.add_argument("--seconds", type=float, default=20.0, help="sim duration")
+    p.add_argument("--seconds", type=float, default=60.0, help="sim duration")
     p.add_argument("--vx", type=float, default=0.0, help="forward velocity command [m/s]")
     p.add_argument("--wz", type=float, default=0.0, help="yaw rate command [rad/s]")
     p.add_argument("--height", type=float, default=default_command["height"], help="body height command [m]")
@@ -91,8 +96,10 @@ def main():
     args = parse_args()
     model = mujoco.MjModel.from_xml_path(MODEL_XML)
     model.opt.timestep = control_timing["sim_dt"]
+    # 加载 MJCF 模型，创建一个变量 data 用于存储仿真运行时数据
     data = mujoco.MjData(model)
     reset_state(data)
+    # 根据 reset 后的 qpos 和 qvel 计算初始衍生状态（如各个 body 的世界坐标、geom的位置等）
     mujoco.mj_forward(model, data)
 
     policy = SequencePolicy(POLICY_PT, device=args.device)
@@ -100,8 +107,6 @@ def main():
     commands = np.array([args.vx, args.wz, args.height], dtype=np.float32)
     last_actions = np.zeros(network["num_actions"], dtype=np.float32)
 
-    # History buffer filled with the first observation (matches env reset, which
-    # repeats the first proprio obs across the whole history window).
     def read_observation():
         quat = data.qpos[3:7]                      # [w,x,y,z]
         world_ang_vel = data.qvel[3:6]             # base angular velocity (world)
@@ -116,6 +121,8 @@ def main():
         return np.clip(obs, -clipping["observations"], clipping["observations"]), legs, dof_vel
 
     obs, legs, dof_vel = read_observation()
+    # History buffer filled with the first observation
+    # (matches env reset, which repeats the first proprio obs across the whole history window).
     obs_history = np.tile(obs, network["obs_history_length"])
 
     n_policy_steps = int(args.seconds / (control_timing["sim_dt"] * control_timing["decimation"]))
@@ -152,8 +159,11 @@ def main():
                 obs_history = np.tile(obs, network["obs_history_length"])
 
             if viewer is not None:
+                # 把当前仿真状态同步到 MuJoCo viewer 窗口里，让我们看到机器人当前位置、姿态和运动结果。
                 viewer.sync()
                 # Real-time pacing for a watchable viewer.
+                # 示例：sim_dt=0.005 且 decimation=2 时，一个策略控制步代表 0.01 秒仿真时间。
+                # 如果本轮循环中的计算实际耗时 0.003 秒，则暂停 0.007 秒，让 viewer 播放速度接近真实时间。
                 dt = control_timing["sim_dt"] * control_timing["decimation"] - (time.time() - t0)
                 if dt > 0:
                     time.sleep(dt)
@@ -165,7 +175,9 @@ def main():
         print(f"Done. final base z={data.qpos[2]:.3f}")
     else:
         from mujoco import viewer as mj_viewer
-
+        
+        # 打开 MuJoCo viewer 窗口，把窗口对象命名为 viewer，然后运行 run_loop(viewer)；
+        # 当这段代码结束后，自动关闭/清理 viewer 相关资源。
         with mj_viewer.launch_passive(model, data) as viewer:
             run_loop(viewer)
 

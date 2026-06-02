@@ -92,10 +92,10 @@ def _vmc(F, T, L0, theta2):
     [[T1],[T2]] = [[0, 1],[J21, J22]] [[F],[T]], applied per leg (length-2).
     """
     L0_sq = L0 ** 2
-    j21 = -(geometry["l1"] * geometry["l2"] * np.sin(theta2) / L0)
-    j22 = geometry["l2"] * (geometry["l1"] * np.cos(theta2) + geometry["l2"]) / L0_sq
+    J21 = -(geometry["l1"] * geometry["l2"] * np.sin(theta2) / L0)
+    J22 = geometry["l2"] * (geometry["l1"] * np.cos(theta2) + geometry["l2"]) / L0_sq
     T1 = T
-    T2 = j21 * F + j22 * T
+    T2 = J21 * F + J22 * T
     return T1, T2
 
 

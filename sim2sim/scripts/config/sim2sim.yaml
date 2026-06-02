@@ -1,38 +1,11 @@
-# Hyperparameter set for the FYT wheel-legged sim2sim verification.
-#
-# Every value here was cross-checked against the training-time config snapshot in
-# logs/.../May12_13-34-06_num-envs-4096_dr-true/ and against the actual layer
-# shapes of model_8000.pt, so the MuJoCo side reproduces the observation,
-# action, and control pipeline the policy was trained with. Do not edit casually:
-# changing any scale or gain here silently breaks sim2sim fidelity.
-#
-# Observation layout, matching LeggedRobotVMC.compute_proprioception_observations:
-#   [ 0: 3] base_ang_vel    * ang_vel(0.25)
-#   [ 3: 6] projected_gravity (unit gravity direction in base frame)
-#   [ 6: 9] commands[vx, wz, h] * [lin_vel(2.0), ang_vel(0.25), height(5.0)]
-#   [ 9:11] theta0 (virtual leg swing angle, L/R) * dof_pos(1.0)
-#   [11:13] theta0_dot                           * dof_vel(0.05)
-#   [13:15] l0 (virtual leg length, L/R)          * l0(4.5)
-#   [15:17] l0_dot (L/R)                          * l0_dot(0.25)
-#   [17:19] wheel dof_pos (L/R)                   * dof_pos(1.0)
-#   [19:21] wheel dof_vel (L/R)                   * dof_vel(0.05)
-#   [21:27] last actions (6)
-#
-# commands_scale = [lin_vel, ang_vel, height_measurements]
-# torque_limits order:
-#   [left_thigh, left_leg, left_wheel, right_thigh, right_leg, right_wheel]
-# default_dof_pos order matches init_state.default_joint_angles and Isaac Gym
-# DOF order:
-#   [left_thigh, left_leg, left_wheel, right_thigh, right_leg, right_wheel]
-# base_pos matches cfg.init_state.pos from the Isaac Gym training task.
-# The third command dimension is body height, normalized by
-# height_measurements=5.0, matching training.
-
 network:
+  # Verified against the training-time config snapshot and model_8000.pt layer shapes.
   num_obs: 27
   num_actions: 6
   obs_history_length: 5
-  num_encoder_obs: 135
+  # 27 obs * 5 history length
+  num_encoder_obs: 135  
+  # 3D body linear velocity
   latent_dim: 3
   encoder_hidden_dims: [128, 64]
   actor_hidden_dims: [128, 64, 32]
@@ -47,13 +20,26 @@ control_timing:
   decimation: 2
 
 observation_scales:
+  # Observation layout, matching LeggedRobotVMC.compute_proprioception_observations:
+  #   [ 0: 3] base_ang_vel    * ang_vel
+  #   [ 3: 6] projected_gravity
+  #   [ 6: 9] commands[vx, wz, h] * commands_scale
+  #   [ 9:11] theta0          * dof_pos
+  #   [11:13] theta0_dot      * dof_vel
+  #   [13:15] l0              * l0
+  #   [15:17] l0_dot          * l0_dot
+  #   [17:19] wheel dof_pos   * dof_pos
+  #   [19:21] wheel dof_vel   * dof_vel
+  #   [21:27] last actions
   lin_vel: 2.0
   ang_vel: 0.25
   dof_pos: 1.0
   dof_vel: 0.05
   l0: 4.5
   l0_dot: 0.25
+  # The third command dimension is body height, normalized by height_measurements=5.0.
   height: 5.0
+  # Order: [lin_vel, ang_vel, height_measurements].
   commands_scale: [2.0, 0.25, 5.0]
 
 action_scales:
@@ -76,10 +62,14 @@ geometry:
   offset: 0.0
 
 limits:
+  # Order: [left_thigh, left_leg, left_wheel, right_thigh, right_leg, right_wheel].
   torque_limits: [30.0, 30.0, 4.5, 30.0, 30.0, 4.5]
 
 initial_state:
-  base_pos: [0.0, 0.0, 0.35]
+  # Matches cfg.init_state.pos from the Isaac Gym training task. Can be modified
+  base_pos: [0.0, 0.0, 0.25]
+  # Order matches init_state.default_joint_angles and Isaac Gym DOF order:
+  # [left_thigh, left_leg, left_wheel, right_thigh, right_leg, right_wheel].
   default_dof_pos: [-0.4, -0.6, 0.0, 0.4, 0.6, 0.0]
 
 dof_indices:
@@ -95,10 +85,13 @@ default_command:
   height: 0.18
 
 kinematics:
+  # Finite-difference step for estimating virtual leg length and swing-angle rates from joint velocities.
   fk_diff_dt: 0.001
 
 safety:
+  # Fall-reset height threshold; play_mujoco.py resets the robot when base_link z drops below this value.
   fall_reset_height: 0.05
 
 logging:
+  # Status print interval in policy steps during headless runs; 100 is about once per second.
   status_interval_steps: 100

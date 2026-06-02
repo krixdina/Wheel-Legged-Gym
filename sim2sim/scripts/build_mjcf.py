@@ -45,9 +45,13 @@ BASE_BOX_POS = "0 0 0.215"
 
 
 def parse_urdf(path):
+    # Purpose: 从 path 表示的 URDF 文件路径中读取机器人结构，并提取生成 MuJoCo 模型所需的连杆和关节信息。
+    # Inputs: path 表示训练阶段使用的 URDF 模型文件位置，本函数会从这个 XML 文件中读取 link 与 joint 节点。
+    # Outputs: 返回 links 和 joints；links 表示按连杆名称索引的视觉网格与惯性参数，joints 表示按 URDF 顺序保存的关节连接、位姿、转轴、限位和力矩上限。
     """Return (links, joints) where each entry keeps only what the MJCF needs."""
     root = ET.parse(path).getroot()
     links = {}
+    # 提取每个 link 节点描述的连杆信息：视觉网格用于后续注册 MuJoCo 资源，惯性参数用于后续给 MuJoCo body 添加质量和转动惯量。
     for link in root.findall("link"):
         name = link.get("name")
         inertial = link.find("inertial")
@@ -71,6 +75,7 @@ def parse_urdf(path):
         links[name] = info
 
     joints = []
+    # 提取每个 joint 节点描述的运动链信息：父子连杆关系用于重建树形结构，关节原点、转轴、限位和力矩上限用于创建 MuJoCo hinge joint 与 motor actuator。
     for joint in root.findall("joint"):
         origin = joint.find("origin")
         limit = joint.find("limit")
@@ -155,11 +160,14 @@ def add_link_geoms(body_el, link_name, link_info):
 
 
 def build():
+    # Purpose: 生成 MuJoCo 可加载的 MJCF 模型文件，把训练阶段使用的 URDF 机器人描述转换成仿真部署所需的 XML 结构。
     links, joints = parse_urdf(URDF_PATH)
     children = {}
+    # 根据 joints 表示的关节列表建立父连杆到子关节的索引，方便后面从 base_link 开始递归恢复整棵机器人运动链。
     for j in joints:
         children.setdefault(j["parent"], []).append(j)
 
+    # 创建 MuJoCo XML 的根节点，并写入编译选项和全局仿真参数；这些设置决定角度单位、网格查找目录、积分步长和重力方向。
     mujoco = ET.Element("mujoco", model="wheel_legged_v4")
     ET.SubElement(
         mujoco,
@@ -180,6 +188,7 @@ def build():
         active="1",
     )
 
+    # 在 asset 节点中注册视觉网格、地面纹理和地面材质；注册后的网格名称会被后续 body 里的几何元素引用。
     # Mesh assets + ground texture/material.
     asset = ET.SubElement(mujoco, "asset")
     for name, info in links.items():
@@ -196,12 +205,14 @@ def build():
         texrepeat="5 5", reflectance="0.1",
     )
 
+    # 创建 worldbody 表示的 MuJoCo 世界主体，并加入光源和地面；地面是机器人轮子和其他碰撞几何发生接触的平面。
     worldbody = ET.SubElement(mujoco, "worldbody")
     ET.SubElement(
         worldbody, "geom", name="floor", type="plane", size="0 0 0.05",
         material="grid", friction="1.0 0.005 0.0001",
     )
 
+    # 创建 base_link 表示的机器人基座，并添加 freejoint 表示的六自由度浮动关节，使机器人可以在 MuJoCo 中移动、倾倒和保持平衡。
     # base_link as floating body. Init height 0.35 to match cfg.init_state.pos.
     base = ET.SubElement(
         worldbody, "body", name="base_link", pos="0 0 0.35",
@@ -227,12 +238,15 @@ def build():
         specular="0.2 0.2 0.2",
     )
 
+    # attach 会把 parent_link 表示的父连杆下方所有子连杆递归挂到 parent_el 表示的 MuJoCo body 元素下，从而复现 URDF 中的树形运动链。
     # Recursively attach child bodies following the URDF kinematic tree.
     def attach(parent_el, parent_link):
         for j in children.get(parent_link, []):
+            # 为当前子连杆创建 MuJoCo body，并用关节原点的平移和旋转描述它相对父连杆的位置关系。
             body = ET.SubElement(
                 parent_el, "body", name=j["child"], pos=j["pos"], euler=j["rpy"],
             )
+            # 为当前子连杆创建单自由度转动关节；关节轴来自 URDF 中的 axis 字段，角度范围来自 URDF 中的 limit 字段。
             jnt_kwargs = dict(
                 name=j["name"], type="hinge", axis=j["axis"], pos="0 0 0",
             )
@@ -242,12 +256,14 @@ def build():
             else:
                 jnt_kwargs["limited"] = "false"
             ET.SubElement(body, "joint", **jnt_kwargs)
+            # 给当前子连杆添加惯性和几何元素；其中几何元素会根据连杆类型选择视觉网格、碰撞网格、轮子圆柱或基座盒子。
             add_inertial(body, links[j["child"]]["inertial"])
             add_link_geoms(body, j["child"], links[j["child"]])
             attach(body, j["child"])
 
     attach(base, "base_link")
 
+    # 为每个真实关节创建 motor actuator 表示的力矩输入通道，使 Python 控制器可以通过 MuJoCo 的控制数组向对应关节施加力矩。
     # Torque actuators: control input is the joint torque computed in Python.
     actuator = ET.SubElement(mujoco, "actuator")
     for j in joints:
@@ -260,6 +276,7 @@ def build():
     # minidom pretty-print keeps the XML readable (ET.indent needs Python 3.9+).
     from xml.dom import minidom
 
+    # 将内存中的 XML 树转换成带缩进的文本，并写入 OUT_PATH 表示的 MJCF 输出文件路径。
     rough = ET.tostring(mujoco, encoding="utf-8")
     pretty = minidom.parseString(rough).toprettyxml(indent="  ")
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)

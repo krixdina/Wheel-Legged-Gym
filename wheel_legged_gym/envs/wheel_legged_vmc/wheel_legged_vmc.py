@@ -97,7 +97,12 @@ class LeggedRobotVMC(LeggedRobot):
             # self.L0_dot / self.theta0_dot 是对应变化率。
             # 它们是 VMC 控制器的状态量；策略网络输出 actions 作为腿长和摆角的目标参考量。
             # 后续 _compute_torques(...) 会把动作目标转换成 l0_ref / theta0_ref，
-            # 再用“目标 - 当前实际状态”的误差生成虚拟腿力和力矩。
+            # 再用“目标 - 当前实际状态”的误差生成各个关节的力矩。
+            #
+            # 整体流程如下:
+            # 策略网络输出的动作是虚拟腿的状态量，而仿真中返回的是原始关节状态，
+            # 所以我们要先将仿真中返回的原始关节状态转换成虚拟腿状态，再结合策略网络的输出计算出用于原始关节的力矩。
+            # 并将力矩施加到仿真中，推动下一帧仿真状态的更新。
             self.leg_post_physics_step()
             self.envs_steps_buf += 1
             self.action_fifo = torch.cat(
