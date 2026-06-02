@@ -67,7 +67,7 @@ limits:
 
 initial_state:
   # Matches cfg.init_state.pos from the Isaac Gym training task. Can be modified
-  base_pos: [0.0, 0.0, 0.25]
+  base_pos: [0.0, 0.0, 0.0]
   # Order matches init_state.default_joint_angles and Isaac Gym DOF order:
   # [left_thigh, left_leg, left_wheel, right_thigh, right_leg, right_wheel].
   # default_dof_pos: [-0.4, -0.6, 0.0, 0.4, 0.6, 0.0]
@@ -96,3 +96,20 @@ safety:
 logging:
   # Status print interval in policy steps during headless runs; 100 is about once per second.
   status_interval_steps: 100
+
+recording:
+  # Offscreen video recording, enabled by `play_mujoco.py --record`.
+  # MuJoCo renders frames offscreen (no window) and the system ffmpeg encodes an
+  # H.264 mp4, so the clip is clean and can be produced on a headless server
+  # (export MUJOCO_GL=egl there). The capture cadence is derived from `fps` so
+  # the clip plays back at ~real time; see play_mujoco.py.
+  output_path: sim2sim/recordings/play.mp4  # relative to repo root
+  # Frame size in pixels; both must be even (yuv420p requirement).
+  width: 1280
+  height: 720
+  fps: 50
+  # Tracking camera that follows base_link so the robot stays framed while driving.
+  camera:
+    distance: 2.0     # [m] camera-to-robot distance
+    azimuth: 90.0     # [deg] horizontal viewing angle (90 = side view)
+    elevation: -15.0  # [deg] vertical angle; negative looks slightly downward

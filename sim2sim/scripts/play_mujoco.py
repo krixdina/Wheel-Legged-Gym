@@ -26,6 +26,7 @@ import yaml
 
 import wl_controller as ctrl
 from policy import SequencePolicy
+from recorder import VideoRecorder
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 MODEL_XML = os.path.join(REPO_ROOT, "sim2sim/model/wheel_legged_v4.xml")
@@ -41,6 +42,7 @@ initial_state = CONFIG["initial_state"]
 default_command = CONFIG["default_command"]
 safety = CONFIG["safety"]
 logging_config = CONFIG["logging"]
+recording = CONFIG["recording"]
 
 # MuJoCo qpos stores generalized positions:
 # [base_x, base_y, base_z, base_qw, base_qx, base_qy, base_qz,
@@ -78,6 +80,11 @@ def quat_rotate_inverse_wxyz(quat_wxyz, vec):
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--headless", action="store_true", help="run without viewer")
+    p.add_argument(
+        "--record",
+        action="store_true",
+        help="record an offscreen mp4 (size/fps/path/camera from the config recording section)",
+    )
     p.add_argument("--seconds", type=float, default=60.0, help="sim duration")
     p.add_argument("--vx", type=float, default=0.0, help="forward velocity command [m/s]")
     p.add_argument("--wz", type=float, default=0.0, help="yaw rate command [rad/s]")
@@ -127,9 +134,18 @@ def main():
     # (matches env reset, which repeats the first proprio obs across the whole history window).
     obs_history = np.tile(obs, network["obs_history_length"])
 
-    n_policy_steps = int(args.seconds / (control_timing["sim_dt"] * control_timing["decimation"]))
+    policy_dt = control_timing["sim_dt"] * control_timing["decimation"]
+    n_policy_steps = int(args.seconds / policy_dt)
 
-    def run_loop(viewer=None):
+    # Recording cadence: capture one frame every `capture_every` policy steps so
+    # the clip plays back at ~real time. We derive the count from the requested
+    # fps and then recompute the exact encoder fps from it, keeping the two
+    # consistent (e.g. 100 Hz policy, fps=50 -> capture_every=2, record_fps=50).
+    policy_rate = 1.0 / policy_dt
+    capture_every = max(1, round(policy_rate / recording["fps"]))
+    record_fps = policy_rate / capture_every
+
+    def run_loop(viewer=None, recorder=None):
         nonlocal obs, obs_history, last_actions, legs, dof_vel
         for step in range(n_policy_steps):
             if viewer is not None and not viewer.is_running():
@@ -160,19 +176,42 @@ def main():
             #     obs, legs, dof_vel = read_observation()
             #     obs_history = np.tile(obs, network["obs_history_length"])
 
+            if recorder is not None and step % capture_every == 0:
+                recorder.capture(data)
+
             if viewer is not None:
                 # 把当前仿真状态同步到 MuJoCo viewer 窗口里，让我们看到机器人当前位置、姿态和运动结果。
                 viewer.sync()
                 # Real-time pacing for a watchable viewer.
                 # 示例：sim_dt=0.005 且 decimation=2 时，一个策略控制步代表 0.01 秒仿真时间。
                 # 如果本轮循环中的计算实际耗时 0.003 秒，则暂停 0.007 秒，让 viewer 播放速度接近真实时间。
-                dt = control_timing["sim_dt"] * control_timing["decimation"] - (time.time() - t0)
+                dt = policy_dt - (time.time() - t0)
                 if dt > 0:
                     time.sleep(dt)
             elif step % logging_config["status_interval_steps"] == 0:
                 print(f"[step {step}] z={data.qpos[2]:.3f} vx_cmd={commands[0]:.2f}")
 
-    if args.headless:
+    if args.record:
+        # Headless-only recording: render offscreen and encode an mp4, no window.
+        recorder = VideoRecorder(
+            model,
+            os.path.join(REPO_ROOT, recording["output_path"]),
+            recording["width"],
+            recording["height"],
+            record_fps,
+            recording["camera"],
+        )
+        print(
+            f"Recording -> {recording['output_path']} "
+            f"({recording['width']}x{recording['height']} @ {record_fps:.1f} fps, "
+            f"1 frame / {capture_every} policy steps)"
+        )
+        try:
+            run_loop(None, recorder)
+        finally:
+            out = recorder.close()
+        print(f"Done. saved {out}. final base z={data.qpos[2]:.3f}")
+    elif args.headless:
         run_loop(None)
         print(f"Done. final base z={data.qpos[2]:.3f}")
     else:

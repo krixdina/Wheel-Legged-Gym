@@ -48,6 +48,18 @@ conda run -n isaac_gym python sim2sim/scripts/play_mujoco.py --vx 0.8 --wz 0.0 -
 conda run -n isaac_gym python sim2sim/scripts/play_mujoco.py --headless --seconds 6 --vx 1.0
 ```
 
+录制视频（离屏渲染，不开窗口，输出 mp4）：
+
+```bash
+conda run -n isaac_gym python sim2sim/scripts/play_mujoco.py --record --seconds 6 --vx 0.8
+```
+
+`--record` 由 MuJoCo 自身离屏渲染逐帧、再交给系统 ffmpeg 编码成 H.264 mp4，画面
+干净且帧率精确。分辨率、帧率、输出路径与跟踪相机参数都在 `scripts/config/sim2sim.yaml`
+的 `recording` 段；抓帧节奏由 `fps` 反推（100 Hz 策略、`fps=50` 即每 2 个策略步抓 1 帧），
+保证回放接近实时。默认输出到 `sim2sim/recordings/play.mp4`（已被 `.gitignore` 的 `*.mp4`
+忽略，不会误提交）。在**无显示器的服务器**上录制需先 `export MUJOCO_GL=egl`。
+
 重新生成 MJCF（仅当 URDF 改变时）：
 
 ```bash
