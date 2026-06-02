@@ -70,7 +70,8 @@ initial_state:
   base_pos: [0.0, 0.0, 0.25]
   # Order matches init_state.default_joint_angles and Isaac Gym DOF order:
   # [left_thigh, left_leg, left_wheel, right_thigh, right_leg, right_wheel].
-  default_dof_pos: [-0.4, -0.6, 0.0, 0.4, 0.6, 0.0]
+  # default_dof_pos: [-0.4, -0.6, 0.0, 0.4, 0.6, 0.0]
+  default_dof_pos: [0.8, 0.0, 0.0, -0.8, 0.0, 0.0]
 
 dof_indices:
   left_thigh: 0

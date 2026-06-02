@@ -150,13 +150,13 @@ def main():
             # Slide history: drop oldest frame, append newest.
             obs_history = np.concatenate([obs_history[network["num_obs"]:], obs])
 
-            if data.qpos[2] < safety["fall_reset_height"]:
-                print(f"[step {step}] base fell (z={data.qpos[2]:.3f}), resetting")
-                reset_state(data)
-                mujoco.mj_forward(model, data)
-                last_actions[:] = 0.0
-                obs, legs, dof_vel = read_observation()
-                obs_history = np.tile(obs, network["obs_history_length"])
+            # if data.qpos[2] < safety["fall_reset_height"]:
+            #     print(f"[step {step}] base fell (z={data.qpos[2]:.3f}), resetting")
+            #     reset_state(data)
+            #     mujoco.mj_forward(model, data)
+            #     last_actions[:] = 0.0
+            #     obs, legs, dof_vel = read_observation()
+            #     obs_history = np.tile(obs, network["obs_history_length"])
 
             if viewer is not None:
                 # 把当前仿真状态同步到 MuJoCo viewer 窗口里，让我们看到机器人当前位置、姿态和运动结果。
