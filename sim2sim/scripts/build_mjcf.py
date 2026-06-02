@@ -28,6 +28,10 @@ OUT_PATH = os.path.join(REPO_ROOT, "sim2sim/model/wheel_legged_v4.xml")
 WHEEL_RADIUS = 0.0579
 WHEEL_HALF_WIDTH = 0.019
 WHEEL_LINKS = {"left_wheel_link", "right_wheel_link"}
+HEADLIGHT_AMBIENT = "0.35 0.35 0.35"
+HEADLIGHT_DIFFUSE = "0.45 0.45 0.45"
+HEADLIGHT_SPECULAR = "0.1 0.1 0.1"
+TOP_LIGHT_HEIGHT = "1.5"
 
 # base_link.STL was decimated in place (via MeshLab) to 190k faces, now within
 # MuJoCo's 200k-face cap, so its real shape loads directly through meshdir like
@@ -166,6 +170,15 @@ def build():
         balanceinertia="true",
     )
     ET.SubElement(mujoco, "option", timestep="0.005", integrator="Euler", gravity="0 0 -9.81")
+    visual = ET.SubElement(mujoco, "visual")
+    ET.SubElement(
+        visual,
+        "headlight",
+        ambient=HEADLIGHT_AMBIENT,
+        diffuse=HEADLIGHT_DIFFUSE,
+        specular=HEADLIGHT_SPECULAR,
+        active="1",
+    )
 
     # Mesh assets + ground texture/material.
     asset = ET.SubElement(mujoco, "asset")
@@ -185,9 +198,6 @@ def build():
 
     worldbody = ET.SubElement(mujoco, "worldbody")
     ET.SubElement(
-        worldbody, "light", pos="0 0 3", dir="0 0 -1", diffuse="0.8 0.8 0.8",
-    )
-    ET.SubElement(
         worldbody, "geom", name="floor", type="plane", size="0 0 0.05",
         material="grid", friction="1.0 0.005 0.0001",
     )
@@ -199,6 +209,23 @@ def build():
     ET.SubElement(base, "freejoint", name="floating_base")
     add_inertial(base, links["base_link"]["inertial"])
     add_link_geoms(base, "base_link", links["base_link"])
+    # A tracking spotlight stays above base_link in world coordinates and keeps
+    # pointing downward, so robot roll/pitch does not rotate the light cone.
+    ET.SubElement(
+        base,
+        "light",
+        name="base_top_spotlight",
+        mode="track",
+        directional="false",
+        castshadow="true",
+        pos=f"0 0 {TOP_LIGHT_HEIGHT}",
+        dir="0 0 -1",
+        cutoff="45",
+        exponent="10",
+        ambient="0.05 0.05 0.05",
+        diffuse="0.9 0.9 0.85",
+        specular="0.2 0.2 0.2",
+    )
 
     # Recursively attach child bodies following the URDF kinematic tree.
     def attach(parent_el, parent_link):
