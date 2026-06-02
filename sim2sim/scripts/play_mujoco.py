@@ -48,6 +48,9 @@ logging_config = CONFIG["logging"]
 # MuJoCo qvel stores generalized velocities:
 # [base_vx, base_vy, base_vz, base_wx, base_wy, base_wz,
 #  left_thigh_vel, left_leg_vel, left_wheel_vel, right_thigh_vel, right_leg_vel, right_wheel_vel].
+# For a freejoint, MuJoCo stores base linear velocity in the world frame, but
+# base angular velocity in the local body frame. Isaac Gym policy observations
+# also expect body-frame angular velocity, so qvel[3:6] can be used directly.
 #
 # build_mjcf.py writes the six MJCF hinge joints in the same order as the URDF:
 # [left_thigh, left_leg, left_wheel, right_thigh, right_leg, right_wheel].
@@ -109,8 +112,7 @@ def main():
 
     def read_observation():
         quat = data.qpos[3:7]                      # [w,x,y,z]
-        world_ang_vel = data.qvel[3:6]             # base angular velocity (world)
-        base_ang_vel = quat_rotate_inverse_wxyz(quat, world_ang_vel)
+        base_ang_vel = data.qvel[3:6].copy()       # base angular velocity (body frame)
         projected_gravity = quat_rotate_inverse_wxyz(quat, np.array([0.0, 0.0, -1.0]))
         dof_pos = data.qpos[QPOS_JOINT_START:].copy()
         dof_vel = data.qvel[QVEL_JOINT_START:].copy()

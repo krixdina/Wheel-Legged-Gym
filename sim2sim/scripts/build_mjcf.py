@@ -32,6 +32,7 @@ HEADLIGHT_AMBIENT = "0.35 0.35 0.35"
 HEADLIGHT_DIFFUSE = "0.45 0.45 0.45"
 HEADLIGHT_SPECULAR = "0.1 0.1 0.1"
 TOP_LIGHT_HEIGHT = "1.5"
+ROBOT_COLLISION_MASK = {"contype": "2", "conaffinity": "1"}
 
 # base_link.STL was decimated in place (via MeshLab) to 190k faces, now within
 # MuJoCo's 200k-face cap, so its real shape loads directly through meshdir like
@@ -122,7 +123,7 @@ def add_link_geoms(body_el, link_name, link_info):
         # Collision: invisible box (not rendered, only for base-ground contact).
         ET.SubElement(
             body_el, "geom", type="box", size=BASE_BOX_HALF, pos=BASE_BOX_POS,
-            group="0", rgba="0.6 0.6 0.6 0",
+            group="0", rgba="0.6 0.6 0.6 0", **ROBOT_COLLISION_MASK,
         )
         return
     if link_info["mesh"] is not None:
@@ -146,6 +147,7 @@ def add_link_geoms(body_el, link_name, link_info):
             size=f"{WHEEL_RADIUS} {WHEEL_HALF_WIDTH}",
             friction="1.0 0.005 0.0001",
             rgba="0.2 0.2 0.2 1",
+            **ROBOT_COLLISION_MASK,
         )
     elif link_info["mesh"] is not None:
         # Non-wheel links collide with their mesh, matching the training asset.
@@ -156,6 +158,7 @@ def add_link_geoms(body_el, link_name, link_info):
             mesh=mesh_name,
             group="0",
             rgba="0.6 0.6 0.6 0.4",
+            **ROBOT_COLLISION_MASK,
         )
 
 
