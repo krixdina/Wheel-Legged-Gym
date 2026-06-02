@@ -1,0 +1,64 @@
+network:
+  num_obs: 27
+  num_actions: 6
+  obs_history_length: 5
+  num_encoder_obs: 135
+  latent_dim: 3
+  encoder_hidden_dims: [128, 64]
+  actor_hidden_dims: [128, 64, 32]
+  activation: elu
+
+clipping:
+  observations: 100.0
+  actions: 100.0
+
+control_timing:
+  sim_dt: 0.005
+  decimation: 2
+
+observation_scales:
+  lin_vel: 2.0
+  ang_vel: 0.25
+  dof_pos: 1.0
+  dof_vel: 0.05
+  l0: 4.5
+  l0_dot: 0.25
+  height: 5.0
+  commands_scale: [2.0, 0.25, 5.0]
+
+action_scales:
+  theta: 0.6
+  l0: 0.1
+  vel: 6.0
+
+control:
+  l0_offset: 0.2
+  feedforward_force: 80.0
+  kp_theta: 80.0
+  kd_theta: 4.0
+  kp_l0: 900.0
+  kd_l0: 45.0
+  wheel_kd: 0.25
+
+geometry:
+  l1: 0.21
+  l2: 0.25
+  offset: 0.0
+
+limits:
+  torque_limits: [30.0, 30.0, 4.5, 30.0, 30.0, 4.5]
+
+initial_state:
+  default_dof_pos: [-0.4, -0.6, 0.0, 0.4, 0.6, 0.0]
+
+dof_indices:
+  left_thigh: 0
+  left_leg: 1
+  left_wheel: 2
+  right_thigh: 3
+  right_leg: 4
+  right_wheel: 5
+  wheel_idx: [2, 5]
+
+default_command:
+  height: 0.18

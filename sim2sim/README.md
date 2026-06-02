@@ -13,7 +13,9 @@ sim2sim/
 │   └── wheel_legged_v4.xml    # 由 URDF 自动生成的 MJCF（build_mjcf.py 产物）
 ├── scripts/
 │   ├── build_mjcf.py          # URDF -> MJCF 转换（一次性）
-│   ├── sim2sim_config.py      # 所有冻结参数（与训练快照逐项核对）
+│   ├── config/
+│   │   └── sim2sim.yaml       # 所有冻结参数（与训练快照逐项核对）
+│   ├── sim2sim_config.py      # 读取 YAML 并导出部署脚本使用的兼容常量
 │   ├── policy.py              # 加载 .pt，重建 encoder+actor 做推理
 │   ├── wl_controller.py       # VMC/五连杆FK/PD 控制律（numpy 版，对齐训练代码）
 │   └── play_mujoco.py         # 主验证脚本
@@ -69,7 +71,7 @@ conda run -n isaac_gym python sim2sim/scripts/build_mjcf.py
 - **控制频率**：sim 200 Hz（dt=0.005），策略 100 Hz（decimation=2）。
 - **观测 27 维**：`base_ang_vel(3) | projected_gravity(3) | commands(3) |
   theta0(2) | theta0_dot(2) | L0(2) | L0_dot(2) | wheel_pos(2) | wheel_vel(2) |
-  last_actions(6)`，缩放系数见 `sim2sim_config.py`。
+  last_actions(6)`，缩放系数见 `scripts/config/sim2sim.yaml`。
 - **历史观测**：5 帧滑动窗口（135 维）输入 encoder 估计 latent（含机体线速度）。
 - **控制律**：动作 -> theta0/L0/轮速参考 -> 阻抗 PD + VMC 闭式雅可比 -> 6 关节力矩，
   左腿镜像取负。几何 l1=0.21, l2=0.25, offset=0。
@@ -81,5 +83,5 @@ conda run -n isaac_gym python sim2sim/scripts/build_mjcf.py
 ## 注意
 
 - 该模型是 `dr-true`（带域随机化）主模型，更适合 sim2sim。若换模型/任务，需同步核对
-  `sim2sim_config.py` 中的维度、缩放与增益，否则 sim2sim 失真。
+  `scripts/config/sim2sim.yaml` 中的维度、缩放与增益，否则 sim2sim 失真。
 - 第三维命令是机体高度，归一化用的是 `height_measurements=5.0`（与训练一致）。
