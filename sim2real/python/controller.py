@@ -60,8 +60,8 @@ class Sim2RealController:
     def observe(self, state):
         """Raw uplink state dict -> (obs(27), obs_history(135)).
 
-        On the first call the history is filled by repeating the first
-        observation, matching the env reset that tiles the first proprio frame.
+        On the first call the history is filled by repeating the first observation,
+        matching the env reset that tiles the first proprio frame.
         """
         obs = self._build_observation(state)
         if self._obs_history is None:

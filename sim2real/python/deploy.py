@@ -15,8 +15,9 @@ Per control step (config.control_timing.policy_rate_hz, e.g. 100 Hz):
     4. sleep to hold the loop rate
 
 Lost-frame policy: re-send the last action. If too many consecutive frames are
-missed (MAX_MISSED_FRAMES) the link is treated as lost -- the loop stops and
-commands a zero action so the lower machine is not driven on stale state.
+missed (config.control_timing.max_missed_frames) the link is treated as lost --
+the loop stops and commands a zero action so the lower machine is not driven on
+stale state.
 
 Run on the NUC:  python sim2real/python/deploy.py
 """
@@ -30,16 +31,15 @@ from controller import Sim2RealController
 from policy import SequencePolicy
 from serial_comm import RobotSerialLink
 
-# Consecutive missed uplink frames tolerated before declaring the link lost.
-# At 100 Hz this is ~0.1 s of silence, after which driving on a re-sent stale
-# action is unsafe, so we stop and zero the command.
-MAX_MISSED_FRAMES = 10
-
 
 def run(device="cpu"):
     num_actions = CONFIG["network"]["num_actions"]
     clip_action = CONFIG["clipping"]["actions"]
-    period = 1.0 / CONFIG["control_timing"]["policy_rate_hz"]
+    timing = CONFIG["control_timing"]
+    period = 1.0 / timing["policy_rate_hz"]
+    # Consecutive missed uplink frames tolerated before the link is declared lost;
+    # beyond this, re-sending the stale action is unsafe, so the loop stops and zeros.
+    max_missed_frames = timing["max_missed_frames"]
 
     link = RobotSerialLink()
     controller = Sim2RealController()
@@ -63,7 +63,7 @@ def run(device="cpu"):
             else:
                 # No fresh frame this step: re-send the last action.
                 missed += 1
-                if missed >= MAX_MISSED_FRAMES:
+                if missed >= max_missed_frames:
                     raise TimeoutError(f"no uplink frame for {missed} steps; link lost")
 
             link.send_action(action)

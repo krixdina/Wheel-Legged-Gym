@@ -58,3 +58,6 @@ clipping:
 # ---- 控制时序 ----
 control_timing:
   policy_rate_hz: 100    # 策略/控制步频率
+  # 连续丢失多少拍上行帧后判定链路丢失：deploy 主循环会停机并下发零动作。
+  # 按 policy_rate_hz 折算时长，例如 100 Hz 下 10 拍≈0.1s；超过此值再重发陈旧动作不安全。
+  max_missed_frames: 10
