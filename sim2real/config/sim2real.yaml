@@ -27,9 +27,14 @@ frame:
   downlink_format: "<6f"
 
 # ---- 策略网络 ----
-# model_path 相对仓库根目录。
+# 路径均相对仓库根目录。
 network:
+  # PyTorch 检查点：Python(torch) 版推理使用。
   model_path: sim2sim/model/model_8000.pt
+  # ONNX 模型：C++(ONNX Runtime) 版推理使用。需先把 model_8000.pt 导出为 ONNX 再指向此处
+  # （见 sim2real/python/export_onnx.py）。导出前该文件可能不存在；C++ policy 会明确检查并报错，
+  # 而不是静默失败。Python 版忽略本字段。
+  onnx_model_path: sim2real/model/policy.onnx
   num_obs: 27
   num_actions: 6
   obs_history_length: 5
