@@ -53,6 +53,10 @@ from .wheel_legged_vmc_flat_fyt.wheel_legged_vmc_flat_fyt_config import (
     WheelLeggedVMCFlatFYTCfg,
     WheelLeggedVMCFlatFYTCfgPPO,
 )
+from .wheel_legged_fyt_whole.wheel_legged_fyt_whole_config import (
+    WheelLeggedFYTWholeCfg,
+    WheelLeggedFYTWholeCfgPPO,
+)
 from .ablation_experiment import (
     FYTAblationNoSequenceCfg,
     FYTAblationNoSequenceCfgPPO,
@@ -101,6 +105,12 @@ task_registry.register(
     LeggedRobotVMCFYT,
     WheelLeggedVMCFlatFYTCfg(),
     WheelLeggedVMCFlatFYTCfgPPO(),
+)
+task_registry.register(
+    "wheel_legged_fyt_whole",
+    LeggedRobotVMCFYT,
+    WheelLeggedFYTWholeCfg(),
+    WheelLeggedFYTWholeCfgPPO(),
 )
 
 # FYT ablation task: replace ActorCriticSequence with ActorCritic to remove
