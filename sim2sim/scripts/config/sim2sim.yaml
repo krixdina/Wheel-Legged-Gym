@@ -70,8 +70,16 @@ initial_state:
   base_pos: [0.0, 0.0, 0.0]
   # Order matches init_state.default_joint_angles and Isaac Gym DOF order:
   # [left_thigh, left_leg, left_wheel, right_thigh, right_leg, right_wheel].
+  # 正常站立姿态
   # default_dof_pos: [-0.4, -0.6, 0.0, 0.4, 0.6, 0.0]
+  # 双腿向后
   default_dof_pos: [0.8, 0.0, 0.0, -0.8, 0.0, 0.0]
+  # 双腿向前
+  # default_dof_pos: [3.1, 0.7, 0.0, -3.1, -0.7, 0.0]
+  # 左腿向前，右腿向后
+  # default_dof_pos: [3.1, 0.7, 0.0, -0.8, 0.0, 0.0]
+  # 右腿向前，左腿向后
+  # default_dof_pos: [0.8, 0.0, 0.0, -3.1, -0.7, 0.0]
 
 dof_indices:
   left_thigh: 0
@@ -103,10 +111,10 @@ recording:
   # H.264 mp4, so the clip is clean and can be produced on a headless server
   # (export MUJOCO_GL=egl there). The capture cadence is derived from `fps` so
   # the clip plays back at ~real time; see play_mujoco.py.
-  output_path: sim2sim/recordings/play.mp4  # relative to repo root
+  output_path: sim2sim/recordings/play_3.mp4  # relative to repo root
   # Frame size in pixels; both must be even (yuv420p requirement).
   width: 1280
-  height: 720
+  height: 960
   fps: 50
   # Tracking camera that follows base_link so the robot stays framed while driving.
   camera:

@@ -53,7 +53,7 @@ from .wheel_legged_vmc_flat_fyt.wheel_legged_vmc_flat_fyt_config import (
     WheelLeggedVMCFlatFYTCfg,
     WheelLeggedVMCFlatFYTCfgPPO,
 )
-from .Ablation import (
+from .ablation_experiment import (
     FYTAblationNoSequenceCfg,
     FYTAblationNoSequenceCfgPPO,
     FYTAblationNoCurriculumCfg,

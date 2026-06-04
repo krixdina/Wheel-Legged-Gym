@@ -1,6 +1,7 @@
 ---
 paths:
  - "sim2sim/**/*"
+ - "sim2real/**/*"
  - "wheel_legged_gym/**/*"
 ---
 
