@@ -1,6 +1,6 @@
 """Serial communication for the wheel-legged sim2real deployment (CPU NUC side).
 
-Three responsibilities, cleanly separated (after the rm_serial_driver design):
+Three responsibilities, cleanly separated:
 
     SerialTransport  - pyserial byte stream (open/read/write); the ONLY I/O layer.
     FrameCodec       - fixed-length framing [SOF][payload][CRC8(optional)][EOF];
@@ -9,19 +9,16 @@ Three responsibilities, cleanly separated (after the rm_serial_driver design):
     protocol funcs   - serialize/deserialize the business fields with struct.
     RobotSerialLink  - wires the three together for the deployment loop.
 
-All parameters (port, baudrate, frame markers, CRC poly, payload layouts) come
-from the shared config so a firmware/protocol change is a one-line yaml edit.
+All parameters (port, baudrate, frame markers, CRC poly, payload layouts) come from the shared config 
 
 Two fixed-length frames (layouts in config.frame):
-    uplink   (lower machine -> NUC): every network state EXCEPT last_action, raw
-        and unscaled: base_ang_vel(3) | projected_gravity(3) | commands(3) |
+    uplink   (lower machine -> NUC): every network state EXCEPT last_action, raw and unscaled: 
+        base_ang_vel(3) | projected_gravity(3) | commands(3) |
         theta0(2) | theta0_dot(2) | L0(2) | L0_dot(2) | wheel_pos(2) | wheel_vel(2).
     downlink (NUC -> lower machine): action(6).
 
 All multi-byte fields are little-endian, matching the MCU's memcpy serialization
 (NUC and STM32 are both little-endian).
-
-Deploy note: `pip install pyserial` on the NUC.
 """
 import struct
 
@@ -32,8 +29,7 @@ from config import CONFIG
 
 _frame = CONFIG["frame"]
 
-# Field offsets inside the 21-float uplink payload (fixed by the protocol order
-# documented above and in 状态量与动作量说明.md).
+# Field offsets inside the 21-float uplink payload
 _UPLINK_SLICES = {
     "base_ang_vel": (0, 3),
     "projected_gravity": (3, 6),

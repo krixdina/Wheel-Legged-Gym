@@ -6,8 +6,7 @@ VMC/PD torque law: the lower machine already computes the virtual-leg states
 lower machine also turns the 6-dim action into joint torques. This controller is
 purely the NUC-side policy interface:
 
-    - scale the 21 raw uplink states into the 27-dim observation (last_action
-      appended), in the exact order of 状态量与动作量说明.md,
+    - scale the 21 raw uplink states into the 27-dim observation (last_action appended)
     - clip the observation,
     - maintain the 5-frame history window the encoder consumes,
     - remember the last action that was sent (it is fed back into the next obs).
@@ -30,8 +29,8 @@ class Sim2RealController:
         self._num_obs = network["num_obs"]
         self._num_actions = network["num_actions"]
         self._history_length = network["obs_history_length"]
-        # last_action starts at zero (matches the env reset); _obs_history is
-        # lazily filled on the first observation so it repeats the first frame.
+        # last_action starts at zero (matches the env reset); 
+        # _obs_history is lazily filled on the first observation so it repeats the first frame.
         self._last_action = np.zeros(self._num_actions, dtype=np.float32)
         self._obs_history = None
 

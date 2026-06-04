@@ -1,9 +1,9 @@
 # sim2real 部署共用配置。
-# Python 版与（将来的）C++ 版推理代码共用本文件，保证两套实现的参数完全一致；
+# Python 版与 C++ 版推理代码共用本文件，保证两套实现的参数完全一致；
 # 协议/固件一旦调整，只需改这里一处。
 
 # ---- 串口 ----
-# port 建议用 udev 规则绑定为固定名称（如 /dev/wl_lower），避免重新插拔后串口号变化。
+# port 建议用 udev 规则绑定为固定名称，避免重新插拔后串口号变化。
 serial:
   port: /dev/ttyUSB0
   baudrate: 115200
@@ -17,15 +17,16 @@ frame:
   use_crc8: true     # 校验总开关；false 则无校验字节、不校验
   crc8_poly: 0x07    # CRC-8 多项式（仅 use_crc8=true 时使用，固件须一致）
   crc8_init: 0x00    # CRC-8 初值
-  # payload 二进制布局，小端（struct 格式串），字段顺序由协议固定。
+  # payload 二进制布局，使用小端序（struct 格式串），字段顺序由协议固定。
   # 上行（下位机 -> NUC）：除上一帧动作外网络需要的全部状态量，均为原始物理量、未缩放：
   #   base_ang_vel(3) | projected_gravity(3) | commands(3) |
   #   theta0(2) | theta0_dot(2) | L0(2) | L0_dot(2) | wheel_pos(2) | wheel_vel(2) = 21 floats
+  # "<21f" 是 Python struct 格式串："<" 表示小端字节序，"21" 表示连续 21 个数值，"f" 表示每个数值按 4 字节 float 解析。
   uplink_format: "<21f"
   # 下行（NUC -> 下位机）：6 维策略动作 [L_theta, L_l0, L_wheel, R_theta, R_l0, R_wheel]
   downlink_format: "<6f"
 
-# ---- 策略网络（层宽已与 model_8000.pt 核对一致）----
+# ---- 策略网络 ----
 # model_path 相对仓库根目录。
 network:
   model_path: sim2sim/model/model_8000.pt
@@ -40,9 +41,6 @@ network:
 
 # ---- 观测缩放（下位机送原始量，缩放统一在 NUC 端做，与训练/sim2sim 一致）----
 # 观测拼接顺序与缩放（projected_gravity 与 last_actions 不缩放，系数视为 1）：
-#   base_ang_vel * ang_vel | projected_gravity | commands * commands_scale |
-#   theta0 * dof_pos | theta0_dot * dof_vel | L0 * l0 | L0_dot * l0_dot |
-#   wheel_pos * dof_pos | wheel_vel * dof_vel | last_actions
 observation_scales:
   ang_vel: 0.25
   dof_pos: 1.0

@@ -1,8 +1,7 @@
 """Load the shared sim2real deployment config once for all Python modules.
 
 Every Python deployment module imports CONFIG from here instead of re-reading the
-yaml, so the file is parsed in exactly one place and the Python and (future) C++
-sides stay driven by the same sim2real/config/sim2real.yaml.
+yaml, so the file is parsed in exactly one place 
 """
 from pathlib import Path
 
