@@ -34,7 +34,7 @@ class WheelLeggedFYTCfg(LeggedRobotCfg):
             heading = [-3.14, 3.14]
 
     class asset(LeggedRobotCfg.asset):
-        file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/resources/robots/wheel_legged_fyt/urdf/wheel_legged_v4_isaac.urdf"
+        file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/resources/robots/wheel_legged_fyt_whole/urdf/wheel_legged_fyt_whole.urdf"
         name = "WheelLeggedFYT"
         offset = 0.0
         l1 = 0.21

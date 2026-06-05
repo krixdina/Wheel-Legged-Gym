@@ -15,10 +15,6 @@ Per control step (config.control_timing.policy_rate_hz, e.g. 100 Hz):
     3. send the physical command downstream
     4. sleep to hold the loop rate
 
-The downlink carries physically meaningful targets (theta0_ref / l0_ref /
-wheel_vel_ref), not raw actions: the action scaling that used to run on the lower
-machine now happens here on the NUC (Sim2RealController.scale_action).
-
 Lost-frame policy: re-send the last command. If too many consecutive frames are
 missed (config.control_timing.max_missed_frames) the link is treated as lost --
 the loop stops and sends the neutral physical command (scaled zero action) so the
@@ -49,9 +45,7 @@ def run(device="cpu"):
     policy = SequencePolicy(device=device)
     link = RobotSerialLink()
 
-    # Physical "neutral" command = scaled zero action (legs at default length
-    # l0_offset, wheels stopped). It is the physical equivalent of the old raw-zero
-    # stop, used as the initial command and as the safe command on exit.
+    # Physical "neutral" command = scaled zero action (legs at default length l0_offset, wheels stopped). 
     neutral_action = controller.scale_action(np.zeros(num_actions, dtype=np.float32))
     action = neutral_action.copy()  # physical command re-sent on a missed frame
     missed = 0
@@ -65,8 +59,8 @@ def run(device="cpu"):
             if state is not None:
                 missed = 0
                 obs, obs_history = controller.observe(state)
-                # Clip the RAW network output, store it as last_action (it feeds the
-                # next observation), then scale it into the physical downlink command.
+                # Clip the RAW network output, store it as last_action (it feeds the next observation), 
+                # then scale it into the physical downlink command.
                 raw_action = np.clip(policy.act(obs, obs_history), -clip_action, clip_action)
                 controller.set_last_action(raw_action)
                 action = controller.scale_action(raw_action)
