@@ -8,15 +8,16 @@
 
 ```
 sim2sim/
-├── model/
-│   ├── model_8000.pt          # 被验证的策略（env_nums dr-true 主模型）
+├── robot/
 │   └── wheel_legged_v4.xml    # 由 URDF 自动生成的 MJCF（build_mjcf.py 产物）
+├── model/
+│   └── model_8000.pt          # 被验证的策略（env_nums dr-true 主模型）
 ├── scripts/
 │   ├── build_mjcf.py          # URDF -> MJCF 转换（一次性）
 │   ├── config/
 │   │   └── sim2sim.yaml       # 所有冻结参数（与训练快照逐项核对）
 │   ├── policy.py              # 加载 .pt，重建 encoder+actor 做推理
-│   ├── wl_controller.py       # VMC/五连杆FK/PD 控制律（numpy 版，对齐训练代码）
+│   ├── controller.py          # VMC/五连杆FK/PD 控制律（numpy 版，对齐训练代码）
 │   └── play_mujoco.py         # 主验证脚本
 └── README.md
 ```

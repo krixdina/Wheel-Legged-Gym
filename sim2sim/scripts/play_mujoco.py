@@ -2,7 +2,7 @@
 
 Pipeline per policy step (100 Hz):
     1. read MuJoCo state -> base ang vel / projected gravity / joint pos,vel
-    2. compute virtual-leg states (theta0, L0, rates) via wl_controller
+    2. compute virtual-leg states (theta0, L0, rates) via controller
     3. build the 27-dim observation, push into the 5-frame history buffer
     4. policy: latent = encoder(history); action = actor([obs, latent])
     5. controller: action -> 6 joint torques (VMC + PD)
@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-# 确保从任何工作目录运行时都能正确导入 policy.py 和 wl_controller.py
+# 确保从任何工作目录运行时都能正确导入 policy.py 和 controller.py
 # 如果运行 python sim2sim/scripts/play_mujoco.py 那么 python 会自动加载 sim2sim/scripts/policy_mujoco.py 这个文件，
 # 并在全局作用域中自动提供 __file__ = "sim2sim/scripts/play_mujoco.py"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,16 +24,20 @@ import numpy as np
 import mujoco
 import yaml
 
-import wl_controller as ctrl
+import controller as ctrl
 from policy import SequencePolicy
 from recorder import VideoRecorder
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-MODEL_XML = os.path.join(REPO_ROOT, "sim2sim/model/wheel_legged_v4.xml")
-POLICY_PT = os.path.join(REPO_ROOT, "sim2sim/model/model_8000.pt")
 CONFIG_PATH = Path(__file__).with_name("config") / "sim2sim.yaml"
 with CONFIG_PATH.open("r", encoding="utf-8") as f:
     CONFIG = yaml.safe_load(f)
+
+# Model and policy paths come from the config (repo-root relative), keeping all
+# tunable file locations in sim2sim.yaml instead of hard-coded in the script.
+model_paths = CONFIG["model"]
+MODEL_XML = os.path.join(REPO_ROOT, model_paths["xml_path"])
+POLICY_PT = os.path.join(REPO_ROOT, model_paths["policy_path"])
 
 network = CONFIG["network"]
 clipping = CONFIG["clipping"]

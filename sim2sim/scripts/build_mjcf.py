@@ -12,7 +12,7 @@ copied. The only deliberate modelling choices for MuJoCo are:
 - six torque "motor" actuators, because the VMC + PD control law runs in Python
   and feeds joint torques straight into the simulator.
 
-Run once to (re)create sim2sim/model/wheel_legged_v4.xml.
+Run once to (re)create sim2sim/robot/wheel_legged_v4.xml.
 """
 import os
 import xml.etree.ElementTree as ET
@@ -22,7 +22,7 @@ URDF_PATH = os.path.join(
     REPO_ROOT, "resources/robots/wheel_legged_fyt/urdf/wheel_legged_v4_isaac.urdf"
 )
 MESH_DIR = os.path.join(REPO_ROOT, "resources/robots/wheel_legged_fyt/meshes")
-OUT_PATH = os.path.join(REPO_ROOT, "sim2sim/model/wheel_legged_v4.xml")
+OUT_PATH = os.path.join(REPO_ROOT, "sim2sim/robot/wheel_legged_v4.xml")
 
 # Wheel collision cylinder, measured from left_wheel_link.STL bounds.
 WHEEL_RADIUS = 0.0579
