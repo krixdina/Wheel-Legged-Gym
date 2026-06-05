@@ -54,6 +54,9 @@ Thumbs.db
 logs
 runs
 
+# Build/cache directories
+.cache/
+
 # codex
 .codex
 .style.yapf
