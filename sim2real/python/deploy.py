@@ -19,7 +19,6 @@ missed (config.control_timing.max_missed_frames) the link is treated as lost --
 the loop stops and commands a zero action so the lower machine is not driven on
 stale state.
 
-Run on the NUC:  python sim2real/python/deploy.py
 """
 import argparse
 import time
