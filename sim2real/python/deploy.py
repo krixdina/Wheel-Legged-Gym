@@ -37,7 +37,7 @@ def _open_serial_link(reconnect_interval_s):
     """Open the serial link, retrying until the port is available.
 
     Opening fails (raising serial.SerialException) when the device is not
-    present, e.g. it is unplugged. Instead of crashing with a traceback we print
+    present, Instead of crashing with a traceback we print
     a clear "no serial port found" message and retry every reconnect_interval_s
     seconds, so the deployment can be started before the cable is connected and
     recovers on hot-plug. Ctrl-C during the wait exits cleanly.
@@ -69,7 +69,7 @@ def run(device="cpu"):
         print("\nstopping: interrupted while waiting for serial port")
         return
 
-    # Physical "neutral" command = scaled zero action (legs at default length l0_offset, wheels stopped). 
+    # Physical "neutral" command = scaled zero action (legs at default length l0_offset, wheels stopped).
     neutral_action = controller.scale_action(np.zeros(num_actions, dtype=np.float32))
     action = neutral_action.copy()  # physical command re-sent on a missed frame
     missed = 0
@@ -83,7 +83,7 @@ def run(device="cpu"):
             if state is not None:
                 missed = 0
                 obs, obs_history = controller.observe(state)
-                # Clip the RAW network output, store it as last_action (it feeds the next observation), 
+                # Clip the RAW network output, store it as last_action (it feeds the next observation),
                 # then scale it into the physical downlink command.
                 raw_action = np.clip(policy.act(obs, obs_history), -clip_action, clip_action)
                 controller.set_last_action(raw_action)

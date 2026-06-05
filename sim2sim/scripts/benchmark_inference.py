@@ -12,8 +12,6 @@ For each device we report:
   - forward-only: encoder+actor on pre-made tensors, an upper bound that drops
     the host<->device data movement.
 
-Run inside the isaac_gym conda env:
-    conda run -n isaac_gym python sim2sim/scripts/benchmark_inference.py
 """
 import os
 import sys

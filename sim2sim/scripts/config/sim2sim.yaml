@@ -3,8 +3,8 @@ model:
   # to the repo root (play_mujoco.py joins them with REPO_ROOT), matching how
   # recording.output_path is resolved. The robot MJCF lives under robot/ and the
   # policy checkpoint under model/ so the two asset kinds stay separated.
-  xml_path: sim2sim/robot/wheel_legged_v4.xml
-  policy_path: sim2sim/model/model_8000.pt
+  xml_path: sim2sim/robot/wheel_legged_fyt_whole.xml
+  policy_path: sim2sim/model/model_8000_dr_false.pt
 
 network:
   # Verified against the training-time config snapshot and model_8000.pt layer shapes.

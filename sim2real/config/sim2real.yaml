@@ -80,4 +80,4 @@ control_timing:
   max_missed_frames: 10
   # 打开串口失败（如设备未插）时，deploy 在进入控制循环前每隔多少秒重试一次，
   # 期间持续打印“无法找到串口”，直到串口可用或用户 Ctrl-C 退出。
-  serial_reconnect_interval_s: 2.0
+  serial_reconnect_interval_s: 1.0
