@@ -78,3 +78,6 @@ control_timing:
   # 连续丢失多少拍上行帧后判定链路丢失：deploy 主循环会停机并下发零动作。
   # 按 policy_rate_hz 折算时长，例如 100 Hz 下 10 拍≈0.1s；超过此值再重发陈旧动作不安全。
   max_missed_frames: 10
+  # 打开串口失败（如设备未插）时，deploy 在进入控制循环前每隔多少秒重试一次，
+  # 期间持续打印“无法找到串口”，直到串口可用或用户 Ctrl-C 退出。
+  serial_reconnect_interval_s: 2.0

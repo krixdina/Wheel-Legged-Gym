@@ -25,11 +25,30 @@ import argparse
 import time
 
 import numpy as np
+import serial  # pyserial; SerialException is raised when the port cannot be opened
 
 from config import CONFIG
 from controller import Sim2RealController
 from policy import SequencePolicy
 from serial_comm import RobotSerialLink
+
+
+def _open_serial_link(reconnect_interval_s):
+    """Open the serial link, retrying until the port is available.
+
+    Opening fails (raising serial.SerialException) when the device is not
+    present, e.g. it is unplugged. Instead of crashing with a traceback we print
+    a clear "no serial port found" message and retry every reconnect_interval_s
+    seconds, so the deployment can be started before the cable is connected and
+    recovers on hot-plug. Ctrl-C during the wait exits cleanly.
+    """
+    port = CONFIG["serial"]["port"]
+    while True:
+        try:
+            return RobotSerialLink()
+        except serial.SerialException:
+            print(f"无法找到串口 {port}，{reconnect_interval_s:g}s 后重试…（Ctrl-C 退出）")
+            time.sleep(reconnect_interval_s)
 
 
 def run(device="cpu"):
@@ -43,7 +62,12 @@ def run(device="cpu"):
 
     controller = Sim2RealController()
     policy = SequencePolicy(device=device)
-    link = RobotSerialLink()
+    # Wait for the serial port instead of crashing if it is not present yet.
+    try:
+        link = _open_serial_link(timing["serial_reconnect_interval_s"])
+    except KeyboardInterrupt:
+        print("\nstopping: interrupted while waiting for serial port")
+        return
 
     # Physical "neutral" command = scaled zero action (legs at default length l0_offset, wheels stopped). 
     neutral_action = controller.scale_action(np.zeros(num_actions, dtype=np.float32))
