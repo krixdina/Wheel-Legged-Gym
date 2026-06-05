@@ -1,0 +1,73 @@
+<?xml version="1.0" ?>
+<mujoco model="wheel_legged_v4">
+  <compiler angle="radian" autolimits="true" balanceinertia="true" meshdir="/home/kristina/bachelor-design-projects/Wheel-Legged-Gym/resources/robots/wheel_legged_fyt_whole/meshes"/>
+  <option gravity="0 0 -9.81" integrator="Euler" timestep="0.005"/>
+  <visual>
+    <headlight active="1" ambient="0.35 0.35 0.35" diffuse="0.45 0.45 0.45" specular="0.1 0.1 0.1"/>
+  </visual>
+  <asset>
+    <mesh file="base_link.STL" name="base_link"/>
+    <mesh file="left_thigh_link.STL" name="left_thigh_link"/>
+    <mesh file="left_leg_link.STL" name="left_leg_link"/>
+    <mesh file="left_wheel_link.STL" name="left_wheel_link"/>
+    <mesh file="right_thigh_link.STL" name="right_thigh_link"/>
+    <mesh file="right_leg_link.STL" name="right_leg_link"/>
+    <mesh file="right_wheel_link.STL" name="right_wheel_link"/>
+    <texture builtin="checker" height="512" name="grid" rgb1="0.2 0.3 0.4" rgb2="0.1 0.15 0.2" type="2d" width="512"/>
+    <material name="grid" reflectance="0.1" texrepeat="5 5" texture="grid"/>
+  </asset>
+  <worldbody>
+    <geom friction="1.0 0.005 0.0001" material="grid" name="floor" size="0 0 0.05" type="plane"/>
+    <body name="base_link" pos="0 0 0.35">
+      <freejoint name="floating_base"/>
+      <inertial fullinertia="0.344508 0.440480 0.450556 -0.005765 0.010273 0.010141" mass="18.0" pos="-0.023107 -0.002215 0.138865"/>
+      <geom conaffinity="0" contype="0" group="1" mesh="base_link" rgba="0.75 0.75 0.78 1" type="mesh"/>
+      <geom conaffinity="1" contype="2" group="0" pos="0 0 0.215" rgba="0.6 0.6 0.6 0" size="0.30 0.196 0.236" type="box"/>
+      <light ambient="0.05 0.05 0.05" castshadow="true" cutoff="45" diffuse="0.9 0.9 0.85" dir="0 0 -1" directional="false" exponent="10" mode="track" name="base_top_spotlight" pos="0 0 1.5" specular="0.2 0.2 0.2"/>
+      <body euler="-1.5708 0 0" name="left_thigh_link" pos="0 0.1659 0.11588">
+        <joint axis="0 0 1" limited="true" name="left_thigh_joint" pos="0 0 0" range="-3.14 3.14" type="hinge"/>
+        <inertial fullinertia="0.000130 0.001597 0.001710 -0.000008 0.000003 0.000002" mass="0.32" pos="-0.101619 -0.003797 0.001285"/>
+        <geom conaffinity="0" contype="0" group="1" mesh="left_thigh_link" rgba="0.75 0.75 0.78 1" type="mesh"/>
+        <geom conaffinity="1" contype="2" group="0" mesh="left_thigh_link" rgba="0.6 0.6 0.6 0.4" type="mesh"/>
+        <body euler="0 0 0" name="left_leg_link" pos="-0.21 0 0.018">
+          <joint axis="0 0 1" limited="true" name="left_leg_joint" pos="0 0 0" range="-1.2 0.7" type="hinge"/>
+          <inertial fullinertia="0.002686 0.000075 0.002751 0.000065 -0.000000 0.000006" mass="0.3" pos="0.001518 0.102070 -0.000358"/>
+          <geom conaffinity="0" contype="0" group="1" mesh="left_leg_link" rgba="0.75 0.75 0.78 1" type="mesh"/>
+          <geom conaffinity="1" contype="2" group="0" mesh="left_leg_link" rgba="0.6 0.6 0.6 0.4" type="mesh"/>
+          <body euler="0 0 0" name="left_wheel_link" pos="0 0.25 0.01875">
+            <joint axis="0 0 1" limited="false" name="left_wheel_joint" pos="0 0 0" type="hinge"/>
+            <inertial fullinertia="0.000626 0.000624 0.001191 -0.000002 0.000000 0.000002" mass="0.600" pos="0.000001 0.000189 0.012137"/>
+            <geom conaffinity="0" contype="0" group="1" mesh="left_wheel_link" rgba="0.75 0.75 0.78 1" type="mesh"/>
+            <geom conaffinity="1" contype="2" friction="1.0 0.005 0.0001" rgba="0.2 0.2 0.2 1" size="0.0579 0.019" type="cylinder"/>
+          </body>
+        </body>
+      </body>
+      <body euler="1.5708 0 0" name="right_thigh_link" pos="0 -0.1659 0.11588">
+        <joint axis="0 0 1" limited="true" name="right_thigh_joint" pos="0 0 0" range="-3.14 3.14" type="hinge"/>
+        <inertial fullinertia="0.000130 0.001597 0.001710 0.000008 0.000003 -0.000002" mass="0.32" pos="-0.101619 0.003797 0.001285"/>
+        <geom conaffinity="0" contype="0" group="1" mesh="right_thigh_link" rgba="0.75 0.75 0.78 1" type="mesh"/>
+        <geom conaffinity="1" contype="2" group="0" mesh="right_thigh_link" rgba="0.6 0.6 0.6 0.4" type="mesh"/>
+        <body euler="0 0 0" name="right_leg_link" pos="-0.21 0 0.018">
+          <joint axis="0 0 1" limited="true" name="right_leg_joint" pos="0 0 0" range="-0.7 1.2" type="hinge"/>
+          <inertial fullinertia="0.002686 0.000075 0.002751 -0.000065 -0.000000 -0.000006" mass="0.3" pos="0.001518 -0.10207 -0.000358"/>
+          <geom conaffinity="0" contype="0" group="1" mesh="right_leg_link" rgba="0.75 0.75 0.78 1" type="mesh"/>
+          <geom conaffinity="1" contype="2" group="0" mesh="right_leg_link" rgba="0.6 0.6 0.6 0.4" type="mesh"/>
+          <body euler="0 0 0" name="right_wheel_link" pos="0 -0.25 0.01875">
+            <joint axis="0 0 1" limited="false" name="right_wheel_joint" pos="0 0 0" type="hinge"/>
+            <inertial fullinertia="0.000626 0.000624 0.001191 -0.000002 -0.0 -0.000002" mass="0.600" pos="-0.000001 -0.000189 0.012137"/>
+            <geom conaffinity="0" contype="0" group="1" mesh="right_wheel_link" rgba="0.75 0.75 0.78 1" type="mesh"/>
+            <geom conaffinity="1" contype="2" friction="1.0 0.005 0.0001" rgba="0.2 0.2 0.2 1" size="0.0579 0.019" type="cylinder"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor ctrllimited="true" ctrlrange="-30.0 30.0" gear="1" joint="left_thigh_joint" name="left_thigh_joint"/>
+    <motor ctrllimited="true" ctrlrange="-30.0 30.0" gear="1" joint="left_leg_joint" name="left_leg_joint"/>
+    <motor ctrllimited="true" ctrlrange="-4.5 4.5" gear="1" joint="left_wheel_joint" name="left_wheel_joint"/>
+    <motor ctrllimited="true" ctrlrange="-30.0 30.0" gear="1" joint="right_thigh_joint" name="right_thigh_joint"/>
+    <motor ctrllimited="true" ctrlrange="-30.0 30.0" gear="1" joint="right_leg_joint" name="right_leg_joint"/>
+    <motor ctrllimited="true" ctrlrange="-4.5 4.5" gear="1" joint="right_wheel_joint" name="right_wheel_joint"/>
+  </actuator>
+</mujoco>

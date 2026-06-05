@@ -12,17 +12,34 @@ copied. The only deliberate modelling choices for MuJoCo are:
 - six torque "motor" actuators, because the VMC + PD control law runs in Python
   and feeds joint torques straight into the simulator.
 
-Run once to (re)create sim2sim/robot/wheel_legged_v4.xml.
+Run once to (re)create the MJCF under sim2sim/robot/. Two robot assets share the
+same conversion logic because their URDFs are structurally identical (same 7
+links, 6 joints and link names); pick one with `--robot`:
+
+    python build_mjcf.py                 # default: fyt   -> wheel_legged_v4.xml
+    python build_mjcf.py --robot whole   # whole-body urdf -> wheel_legged_fyt_whole.xml
 """
+import argparse
 import os
 import xml.etree.ElementTree as ET
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-URDF_PATH = os.path.join(
-    REPO_ROOT, "resources/robots/wheel_legged_fyt/urdf/wheel_legged_v4_isaac.urdf"
-)
-MESH_DIR = os.path.join(REPO_ROOT, "resources/robots/wheel_legged_fyt/meshes")
-OUT_PATH = os.path.join(REPO_ROOT, "sim2sim/robot/wheel_legged_v4.xml")
+
+# Each robot variant only differs in its source URDF, mesh directory and the
+# MJCF file name; the conversion logic below is shared. Keeping the per-robot
+# paths in one table avoids editing hard-coded constants when switching assets.
+ROBOT_ASSETS = {
+    "fyt": {
+        "urdf": "resources/robots/wheel_legged_fyt/urdf/wheel_legged_v4_isaac.urdf",
+        "meshes": "resources/robots/wheel_legged_fyt/meshes",
+        "out": "sim2sim/robot/wheel_legged_v4.xml",
+    },
+    "whole": {
+        "urdf": "resources/robots/wheel_legged_fyt_whole/urdf/wheel_legged_fyt_whole.urdf",
+        "meshes": "resources/robots/wheel_legged_fyt_whole/meshes",
+        "out": "sim2sim/robot/wheel_legged_fyt_whole.xml",
+    },
+}
 
 # Wheel collision cylinder, measured from left_wheel_link.STL bounds.
 WHEEL_RADIUS = 0.0579
@@ -162,9 +179,10 @@ def add_link_geoms(body_el, link_name, link_info):
         )
 
 
-def build():
+def build(urdf_path, mesh_dir, out_path):
     # Purpose: 生成 MuJoCo 可加载的 MJCF 模型文件，把训练阶段使用的 URDF 机器人描述转换成仿真部署所需的 XML 结构。
-    links, joints = parse_urdf(URDF_PATH)
+    # Inputs: urdf_path 表示源 URDF 文件路径；mesh_dir 表示该机器人 STL 网格所在目录（写入 MJCF 的 meshdir）；out_path 表示生成的 MJCF 输出路径。
+    links, joints = parse_urdf(urdf_path)
     children = {}
     # 根据 joints 表示的关节列表建立父连杆到子关节的索引，方便后面从 base_link 开始递归恢复整棵机器人运动链。
     for j in joints:
@@ -176,7 +194,7 @@ def build():
         mujoco,
         "compiler",
         angle="radian",
-        meshdir=MESH_DIR,
+        meshdir=mesh_dir,
         autolimits="true",
         balanceinertia="true",
     )
@@ -282,11 +300,28 @@ def build():
     # 将内存中的 XML 树转换成带缩进的文本，并写入 OUT_PATH 表示的 MJCF 输出文件路径。
     rough = ET.tostring(mujoco, encoding="utf-8")
     pretty = minidom.parseString(rough).toprettyxml(indent="  ")
-    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
-    with open(OUT_PATH, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
         f.write(pretty)
-    print("wrote", OUT_PATH)
+    print("wrote", out_path)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--robot",
+        choices=sorted(ROBOT_ASSETS),
+        default="fyt",
+        help="which robot asset to convert (default: fyt)",
+    )
+    args = parser.parse_args()
+    asset = ROBOT_ASSETS[args.robot]
+    build(
+        urdf_path=os.path.join(REPO_ROOT, asset["urdf"]),
+        mesh_dir=os.path.join(REPO_ROOT, asset["meshes"]),
+        out_path=os.path.join(REPO_ROOT, asset["out"]),
+    )
 
 
 if __name__ == "__main__":
-    build()
+    main()
