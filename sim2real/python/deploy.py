@@ -91,5 +91,9 @@ def parse_args():
     return p.parse_args()
 
 
-if __name__ == "__main__":
+def main():
     run(parse_args().device)
+
+
+if __name__ == "__main__":
+    main()
