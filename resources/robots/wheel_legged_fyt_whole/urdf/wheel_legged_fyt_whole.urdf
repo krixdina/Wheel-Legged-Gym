@@ -99,8 +99,8 @@
     <limit
       lower="-3.14"
       upper="3.14"
-      effort="100"
-      velocity="100" />
+      effort="30"
+      velocity="1000" />
   </joint>
   <link
     name="left_leg_link">
@@ -155,10 +155,10 @@
     <axis
       xyz="0 0 -1" />
     <limit
-      lower="-3.14"
-      upper="3.14"
-      effort="100"
-      velocity="100" />
+      lower="-1.2"
+      upper="0.7"
+      effort="30"
+      velocity="1000" />
   </joint>
   <link
     name="left_wheel_link">
@@ -213,10 +213,8 @@
     <axis
       xyz="0 0 1" />
     <limit
-      lower="-3.14"
-      upper="3.14"
-      effort="100"
-      velocity="100" />
+      effort="4.5"
+      velocity="1000" />
   </joint>
   <link
     name="right_thigh_link">
@@ -273,8 +271,8 @@
     <limit
       lower="-3.14"
       upper="3.14"
-      effort="100"
-      velocity="100" />
+      effort="30"
+      velocity="1000" />
   </joint>
   <link
     name="right_leg_link">
@@ -329,10 +327,10 @@
     <axis
       xyz="0 0 -1" />
     <limit
-      lower="-3.14"
-      upper="3.14"
-      effort="100"
-      velocity="100" />
+      lower="-0.7"
+      upper="1.2"
+      effort="30"
+      velocity="1000" />
   </joint>
   <link
     name="right_wheel_link">
@@ -387,10 +385,8 @@
     <axis
       xyz="0 0 1" />
     <limit
-      lower="-3.14"
-      upper="3.14"
-      effort="100"
-      velocity="100" />
+      effort="4.5"
+      velocity="1000" />
   </joint>
 
 </robot>
