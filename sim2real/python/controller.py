@@ -9,7 +9,10 @@ purely the NUC-side policy interface:
     - scale the 21 raw uplink states into the 27-dim observation (last_action appended)
     - clip the observation,
     - maintain the 5-frame history window the encoder consumes,
-    - remember the last action that was sent (it is fed back into the next obs).
+    - remember the last action that was sent (it is fed back into the next obs),
+    - scale the raw policy action into a physical command (theta0_ref / l0_ref /
+      wheel_vel_ref) for the downlink -- the action scaling that used to run on
+      the lower machine now happens here on the NUC.
 
 All scales / dims come from the shared config.
 """
@@ -29,6 +32,16 @@ class Sim2RealController:
         self._num_obs = network["num_obs"]
         self._num_actions = network["num_actions"]
         self._history_length = network["obs_history_length"]
+        # Action scaling (raw policy output -> physical command). Per-element gain
+        # and offset for the 6-dim action [L_theta, L_l0, L_wheel, R_theta, R_l0,
+        # R_wheel]; only the l0 entries carry the l0_offset, matching sim2sim.
+        a = config["action_scales"]
+        self._action_scale = np.array(
+            [a["theta"], a["l0"], a["vel"], a["theta"], a["l0"], a["vel"]], dtype=np.float32
+        )
+        self._action_offset = np.array(
+            [0.0, a["l0_offset"], 0.0, 0.0, a["l0_offset"], 0.0], dtype=np.float32
+        )
         # last_action starts at zero (matches the env reset); 
         # _obs_history is lazily filled on the first observation so it repeats the first frame.
         self._last_action = np.zeros(self._num_actions, dtype=np.float32)
@@ -72,8 +85,25 @@ class Sim2RealController:
         return obs, self._obs_history
 
     def set_last_action(self, action):
-        """Store the action just sent; it becomes last_action in the next obs."""
+        """Store the RAW action just produced; it becomes last_action in the next obs.
+
+        This is the unscaled policy output (matching the training observation),
+        NOT the physical command from scale_action().
+        """
         self._last_action = np.asarray(action, dtype=np.float32)
+
+    def scale_action(self, action):
+        """Raw policy action -> physical command sent over the downlink.
+
+        Per leg (order [L_theta, L_l0, L_wheel, R_theta, R_l0, R_wheel]):
+            theta0_ref [rad]      = action_theta * theta
+            l0_ref [m]            = action_l0    * l0 + l0_offset
+            wheel_vel_ref [rad/s] = action_wheel * vel
+        Mirrors LeggedRobotVMCFYT._compute_torques / sim2sim, so the lower machine
+        receives ready-to-use physical targets instead of raw actions.
+        """
+        scaled = np.asarray(action, dtype=np.float32) * self._action_scale + self._action_offset
+        return scaled.astype(np.float32)
 
     def reset(self):
         """Clear history and last action; call on (re)start or after a fault."""

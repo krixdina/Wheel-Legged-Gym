@@ -55,6 +55,18 @@ observation_scales:
   # commands [vx, wz, height] 的缩放 = [lin_vel, ang_vel, height_measurements]
   commands_scale: [2.0, 0.25, 5.0]
 
+# ---- 动作缩放（策略原始动作 -> 带物理含义的动作量；NUC 端在下发前完成，下位机直接使用）----
+# 动作 6 维顺序 [L_theta, L_l0, L_wheel, R_theta, R_l0, R_wheel]，缩放后每条腿含义：
+#   theta0_ref [rad]      = action_theta * theta
+#   l0_ref [m]            = action_l0    * l0 + l0_offset
+#   wheel_vel_ref [rad/s] = action_wheel * vel
+# 取值与 sim2sim 一致；改成在 NUC 缩放后，下位机收到的就是物理目标而非原始动作。
+action_scales:
+  theta: 0.6
+  l0: 0.1
+  vel: 6.0
+  l0_offset: 0.2
+
 # ---- 裁剪 ----
 clipping:
   observations: 100.0

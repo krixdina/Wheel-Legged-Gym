@@ -9,15 +9,20 @@ control loop:
 
 Per control step (config.control_timing.policy_rate_hz, e.g. 100 Hz):
     1. poll the serial link for the newest uplink state frame
-    2. if a fresh frame arrived: build the observation, run the policy, clip the
-       action; if not: re-send the previous action (keeps the lower machine fed)
-    3. send the action downstream and record it as last_action
+    2. fresh frame  -> build obs, run the policy, clip the RAW action (stored as
+       last_action for the next obs), then scale it into a physical command;
+       no new frame -> re-send the previous physical command
+    3. send the physical command downstream
     4. sleep to hold the loop rate
 
-Lost-frame policy: re-send the last action. If too many consecutive frames are
+The downlink carries physically meaningful targets (theta0_ref / l0_ref /
+wheel_vel_ref), not raw actions: the action scaling that used to run on the lower
+machine now happens here on the NUC (Sim2RealController.scale_action).
+
+Lost-frame policy: re-send the last command. If too many consecutive frames are
 missed (config.control_timing.max_missed_frames) the link is treated as lost --
-the loop stops and commands a zero action so the lower machine is not driven on
-stale state.
+the loop stops and sends the neutral physical command (scaled zero action) so the
+lower machine is not driven on stale state.
 
 """
 import argparse
@@ -40,12 +45,15 @@ def run(device="cpu"):
     # beyond this, re-sending the stale action is unsafe, so the loop stops and zeros.
     max_missed_frames = timing["max_missed_frames"]
 
-    link = RobotSerialLink()
     controller = Sim2RealController()
     policy = SequencePolicy(device=device)
+    link = RobotSerialLink()
 
-    # Last action re-sent on a missed frame; starts at the safe zero action.
-    action = np.zeros(num_actions, dtype=np.float32)
+    # Physical "neutral" command = scaled zero action (legs at default length
+    # l0_offset, wheels stopped). It is the physical equivalent of the old raw-zero
+    # stop, used as the initial command and as the safe command on exit.
+    neutral_action = controller.scale_action(np.zeros(num_actions, dtype=np.float32))
+    action = neutral_action.copy()  # physical command re-sent on a missed frame
     missed = 0
 
     print(f"sim2real deploy: {1.0 / period:.0f} Hz, device={device}. Ctrl-C to stop.")
@@ -57,10 +65,13 @@ def run(device="cpu"):
             if state is not None:
                 missed = 0
                 obs, obs_history = controller.observe(state)
-                action = np.clip(policy.act(obs, obs_history), -clip_action, clip_action)
-                controller.set_last_action(action)
+                # Clip the RAW network output, store it as last_action (it feeds the
+                # next observation), then scale it into the physical downlink command.
+                raw_action = np.clip(policy.act(obs, obs_history), -clip_action, clip_action)
+                controller.set_last_action(raw_action)
+                action = controller.scale_action(raw_action)
             else:
-                # No fresh frame this step: re-send the last action.
+                # No fresh frame this step: re-send the last physical command.
                 missed += 1
                 if missed >= max_missed_frames:
                     raise TimeoutError(f"no uplink frame for {missed} steps; link lost")
@@ -74,10 +85,10 @@ def run(device="cpu"):
     except (KeyboardInterrupt, TimeoutError) as exc:
         print(f"\nstopping: {exc if str(exc) else 'interrupted'}")
     finally:
-        # Always leave the robot with a zero command, then close the port.
-        link.send_action(np.zeros(num_actions, dtype=np.float32))
+        # Always leave the robot with the neutral physical command, then close.
+        link.send_action(neutral_action)
         link.close()
-        print("sent zero action and closed serial port.")
+        print("sent neutral action and closed serial port.")
 
 
 def parse_args():
