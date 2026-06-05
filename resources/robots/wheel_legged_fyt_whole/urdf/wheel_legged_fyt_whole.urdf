@@ -153,7 +153,7 @@
     <child
       link="left_leg_link" />
     <axis
-      xyz="0 0 -1" />
+      xyz="0 0 1" />
     <limit
       lower="-1.2"
       upper="0.7"
@@ -325,7 +325,7 @@
     <child
       link="right_leg_link" />
     <axis
-      xyz="0 0 -1" />
+      xyz="0 0 1" />
     <limit
       lower="-0.7"
       upper="1.2"
