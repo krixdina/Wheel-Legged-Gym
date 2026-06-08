@@ -67,7 +67,7 @@ QVEL_JOINT_START = 6
 
 
 # Purpose: 将世界坐标系下的三维向量旋转到机器人机体坐标系，用于构造与 Isaac Gym 训练侧一致的角速度和重力方向观测。
-# Inputs: quat_wxyz 表示 MuJoCo 提供的基座姿态四元数，排列顺序是 [w, x, y, z]；vec 表示需要从世界坐标系变换到机体系的三维向量。
+# Inputs: quat_wxyz 表示 MuJoCo 提供的机体姿态四元数，排列顺序是 [w, x, y, z]；vec 表示需要从世界坐标系变换到机体系的三维向量。
 # Outputs: 返回旋转后的三维向量，其物理含义是同一个向量在 base_link 机体坐标系下的表达。
 def quat_rotate_inverse_wxyz(quat_wxyz, vec):
     # 将 MuJoCo 四元数拆成标量部分和向量部分；这里的四元数顺序是 [w, x, y, z]，而训练侧工具函数内部使用的是标量和向量分开的公式。
@@ -122,7 +122,7 @@ def main():
     last_actions = np.zeros(network["num_actions"], dtype=np.float32)
 
     def read_observation():
-        quat = data.qpos[3:7]                      # [w,x,y,z]
+        quat = data.qpos[3:7]                      # 机体坐标系的旋转姿态 [w,x,y,z]
         base_ang_vel = data.qvel[3:6].copy()       # base angular velocity (body frame)
         projected_gravity = quat_rotate_inverse_wxyz(quat, np.array([0.0, 0.0, -1.0]))
         dof_pos = data.qpos[QPOS_JOINT_START:].copy()

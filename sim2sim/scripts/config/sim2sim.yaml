@@ -4,7 +4,7 @@ model:
   # recording.output_path is resolved. The robot MJCF lives under robot/ and the
   # policy checkpoint under model/ so the two asset kinds stay separated.
   xml_path: sim2sim/robot/wheel_legged_fyt_whole.xml
-  policy_path: sim2sim/model/model_8000_dr_false.pt
+  policy_path: sim2sim/model/model_8000.pt
 
 network:
   # Verified against the training-time config snapshot and model_8000.pt layer shapes.
