@@ -1,0 +1,4 @@
+# colcon workspace artifacts (generated; never committed)
+build/
+install/
+log/

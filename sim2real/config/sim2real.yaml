@@ -72,6 +72,16 @@ clipping:
   observations: 100.0
   actions: 100.0
 
+# ---- 调试可视化（ROS2，仅调试用）----
+# debug=true 时，部署主循环在每个有效控制步把「解码后的上行状态、缩放前的原始动作、
+# 缩放后的物理动作」发布到 ROS2 话题（/sim2real_debug/state、/action_raw、/action_scaled），
+# 供 Foxglove / PlotJuggler / rqt_plot 可视化，并与 sim2sim 参考轨迹逐字段对比。
+# 发布走后台线程+队列，绝不阻塞策略推理；队列满则丢弃（调试数据尽力而为）。
+# 仅在 debug=true 时才导入 rclpy，因此非调试部署在 isaac_gym(py3.7) 下完全不受影响。
+# 启用前提：在 Python 3.10 环境中运行，且已 source ROS2 Humble 与 wheel_legged_msgs
+# （见 sim2real/ros2/README.md）。
+debug: false
+
 # ---- 控制时序 ----
 control_timing:
   policy_rate_hz: 100    # 策略/控制步频率

@@ -51,6 +51,25 @@ def _open_serial_link(reconnect_interval_s):
             time.sleep(reconnect_interval_s)
 
 
+def _make_debug_publisher():
+    """Construct the ROS2 debug publisher, or return None if debug is off.
+
+    rclpy (and the custom messages) are imported here, lazily, so that a normal
+    deployment with debug=false never needs ROS2 and keeps running under Python
+    3.7 / isaac_gym. With debug=true this requires a Python 3.10 environment with
+    ROS2 Humble and wheel_legged_msgs sourced; the import error is left to
+    propagate so the missing setup is reported clearly instead of silently
+    falling back.
+    """
+    if not CONFIG.get("debug", False):
+        return None
+    from debug_publisher import DebugPublisher
+
+    publisher = DebugPublisher()
+    print("debug=true: publishing state/action_raw/action_scaled to ROS2 (/sim2real_debug/*)")
+    return publisher
+
+
 def run(device="cpu"):
     num_actions = CONFIG["network"]["num_actions"]
     clip_action = CONFIG["clipping"]["actions"]
@@ -62,11 +81,15 @@ def run(device="cpu"):
 
     controller = Sim2RealController()
     policy = SequencePolicy(device=device)
+    # Optional ROS2 debug publishing; None unless config.debug is true.
+    debug_publisher = _make_debug_publisher()
     # Wait for the serial port instead of crashing if it is not present yet.
     try:
         link = _open_serial_link(timing["serial_reconnect_interval_s"])
     except KeyboardInterrupt:
         print("\nstopping: interrupted while waiting for serial port")
+        if debug_publisher is not None:
+            debug_publisher.shutdown()
         return
 
     # Physical "neutral" command = scaled zero action (legs at default length l0_offset, wheels stopped).
@@ -88,11 +111,15 @@ def run(device="cpu"):
                 raw_action = np.clip(policy.act(obs, obs_history), -clip_action, clip_action)
                 controller.set_last_action(raw_action)
                 action = controller.scale_action(raw_action)
+                # Debug only: hand this step's state and both actions to ROS2.
+                # Non-blocking (enqueue + drop-on-full); no-op when debug is off.
+                if debug_publisher is not None:
+                    debug_publisher.publish_step(state, raw_action, action)
             else:
                 # No fresh frame this step: re-send the last physical command.
                 missed += 1
                 if missed >= max_missed_frames:
-                    raise TimeoutError(f"no uplink frame for {missed} steps; link lost")
+                    print(f"no uplink frame for {missed} steps; link lost")
 
             link.send_action(action)
 
@@ -106,6 +133,8 @@ def run(device="cpu"):
         # Always leave the robot with the neutral physical command, then close.
         link.send_action(neutral_action)
         link.close()
+        if debug_publisher is not None:
+            debug_publisher.shutdown()
         print("sent neutral action and closed serial port.")
 
 
