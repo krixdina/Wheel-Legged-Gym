@@ -16,10 +16,14 @@ sim2real comparison:
 During early sim2real testing the live serial values can then be checked against
 this known-good baseline in TensorBoard.
 
-Run from the repo root, e.g.:
-    conda run -n isaac_gym python sim2sim/reference_data/collect_reference_data.py --seconds 30 --vx 0.5
+Each invocation writes to its own sub-run under --logdir, named with the date-time
+and the command it was driven with (vx/wz/height) plus the duration, so multiple
+traces stay distinguishable in the file system and in the TensorBoard run list
+without having to open every one. Pass --run_name to override the auto name.
+
 """
 import argparse
+import datetime
 import os
 import sys
 
@@ -47,8 +51,42 @@ def parse_args():
     p.add_argument("--wz", type=float, default=0.0, help="yaw rate command [rad/s]")
     p.add_argument("--height", type=float, default=pm.default_command["height"], help="body height command [m]")
     p.add_argument("--device", default="cpu")
-    p.add_argument("--logdir", default=DEFAULT_LOGDIR, help="TensorBoard log directory")
+    p.add_argument("--logdir", default=DEFAULT_LOGDIR,
+                   help="parent directory; each run is written to a named sub-folder under it")
+    p.add_argument("--run_name", default=None,
+                   help="override the auto-generated run sub-folder name")
     return p.parse_args()
+
+
+def _fmt_command_value(value):
+    """Format a command value for a run name: fixed 2 decimals, sign-safe, no dot.
+
+    Keeps the name a valid single path segment (e.g. -0.50 -> "m0p50") so vx/wz/
+    height stay readable and never introduce a path separator or a leading '-'
+    that some tools mistake for a flag.
+    """
+    sign = "m" if value < 0 else ""
+    return f"{sign}{abs(value):.2f}".replace(".", "p")
+
+
+def build_run_name(args):
+    """Build a self-describing run sub-folder name from the command and the date.
+
+    Encodes everything needed to tell traces apart at a glance -- the date-time
+    the trace was recorded, the vx/wz/height command it was driven with, and the
+    duration -- e.g. 20260609-201530_vx0p50_wz0p00_h0p18_t30s. --run_name wins if
+    given.
+    """
+    if args.run_name:
+        return args.run_name
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return (
+        f"{stamp}"
+        f"_vx{_fmt_command_value(args.vx)}"
+        f"_wz{_fmt_command_value(args.wz)}"
+        f"_h{_fmt_command_value(args.height)}"
+        f"_t{args.seconds:g}s"
+    )
 
 
 def log_state(writer, step, base_ang_vel, projected_gravity, commands, legs, dof_vel, dof_pos):
@@ -142,8 +180,11 @@ def main():
     policy_dt = pm.control_timing["sim_dt"] * pm.control_timing["decimation"]
     n_policy_steps = int(args.seconds / policy_dt)
 
-    writer = SummaryWriter(log_dir=args.logdir)
-    print(f"Collecting {args.seconds:.0f}s ({n_policy_steps} steps) -> {args.logdir} "
+    # Write this trace to its own named sub-run so multiple collections stay
+    # distinguishable; the name carries the date-time and the command values.
+    run_dir = os.path.join(args.logdir, build_run_name(args))
+    writer = SummaryWriter(log_dir=run_dir)
+    print(f"Collecting {args.seconds:.0f}s ({n_policy_steps} steps) -> {run_dir} "
           f"(vx={args.vx}, wz={args.wz}, height={args.height})")
 
     for step in range(n_policy_steps):
@@ -169,7 +210,7 @@ def main():
 
     writer.flush()
     writer.close()
-    print(f"Done. wrote TensorBoard scalars for {n_policy_steps} steps to {args.logdir}")
+    print(f"Done. wrote TensorBoard scalars for {n_policy_steps} steps to {run_dir}")
 
 
 if __name__ == "__main__":

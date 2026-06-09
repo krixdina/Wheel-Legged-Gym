@@ -12,8 +12,18 @@
 conda run -n isaac_gym python sim2sim/reference_data/collect_reference_data.py --seconds 30 --vx 0.5
 ```
 
-参数：`--seconds`（时长，默认 30）、`--vx/--wz/--height`（命令）、`--logdir`（默认 `runs/`）。
-事件文件写入 [`runs/`](runs/)（重复运行会追加新的事件文件，TensorBoard 会一并显示）。
+参数：`--seconds`（时长，默认 30）、`--vx/--wz/--height`（命令）、`--logdir`（父目录，默认 `runs/`）、
+`--run_name`（自定义本次 run 子目录名，覆盖自动命名）。
+
+每次采集都会在 `--logdir` 下生成**单独的命名子目录**作为本次 run，名称自动带上日期时间与命令值，例如：
+
+```text
+runs/20260609-201530_vx0p50_wz0p00_h0p18_t30s/
+```
+
+即"`日期-时间_vx<值>_wz<值>_h<值>_t<时长>s`"。命令值按两位小数编码，小数点写作 `p`、负号写作 `m`
+（如 `-0.50` → `m0p50`），保证目录名是单一合法路径段。这样无需逐个打开就能在文件系统和 TensorBoard
+的 run 列表中区分每次采集属于哪条命令。需要固定名称时用 `--run_name` 覆盖。
 
 ## 在浏览器查看
 
