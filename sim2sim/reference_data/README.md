@@ -18,10 +18,11 @@ conda run -n isaac_gym python sim2sim/reference_data/collect_reference_data.py -
 每次采集都会在 `--logdir` 下生成**单独的命名子目录**作为本次 run，名称自动带上日期时间与命令值，例如：
 
 ```text
-runs/20260609-201530_vx0p50_wz0p00_h0p18_t30s/
+runs/Jun09_20-15-30_vx0p50_wz0p00_h0p18_t30s/
 ```
 
-即"`日期-时间_vx<值>_wz<值>_h<值>_t<时长>s`"。命令值按两位小数编码，小数点写作 `p`、负号写作 `m`
+即"`月日_时-分-秒_vx<值>_wz<值>_h<值>_t<时长>s`"。日期时间格式（`%b%d_%H-%M-%S`）与
+`logs/` 下训练 run 的命名一致（见 `task_registry.py`），全仓库统一时间戳约定。命令值按两位小数编码，小数点写作 `p`、负号写作 `m`
 （如 `-0.50` → `m0p50`），保证目录名是单一合法路径段。这样无需逐个打开就能在文件系统和 TensorBoard
 的 run 列表中区分每次采集属于哪条命令。需要固定名称时用 `--run_name` 覆盖。
 
@@ -42,3 +43,5 @@ conda run -n isaac_gym tensorboard --logdir sim2sim/reference_data/runs
   `l0_ref_{L,R}` [m]、`wheel_vel_ref_{L,R}` [rad/s]，缩放公式与 controller / sim2real 一致。
 
 横轴为控制步序号；同一 step 上 `state[k]` 对应产生 `action[k]`，与实时循环一致。
+
+很好，现在我已经在。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。中记录了机器人从倒地到站立

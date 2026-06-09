@@ -74,12 +74,15 @@ def build_run_name(args):
 
     Encodes everything needed to tell traces apart at a glance -- the date-time
     the trace was recorded, the vx/wz/height command it was driven with, and the
-    duration -- e.g. 20260609-201530_vx0p50_wz0p00_h0p18_t30s. --run_name wins if
+    duration -- e.g. Jun09_20-15-30_vx0p50_wz0p00_h0p18_t30s. --run_name wins if
     given.
+
+    The date-time format (%b%d_%H-%M-%S) matches the training run naming under
+    logs/ (see task_registry.py), keeping a single timestamp convention repo-wide.
     """
     if args.run_name:
         return args.run_name
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.datetime.now().strftime("%b%d_%H-%M-%S")
     return (
         f"{stamp}"
         f"_vx{_fmt_command_value(args.vx)}"
