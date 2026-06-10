@@ -84,3 +84,13 @@ ros2 topic hz   /sim2real_debug/action_scaled      # 频率核验（≈100 Hz）
 部署主循环只调用 `publish_step()`，它把一条记录 `put_nowait` 进有界队列即返回（队列满则丢弃，
 调试数据尽力而为），**绝不调用 rclpy、绝不阻塞**。真正的建节点与发布全部在后台工作线程完成。
 实测在 100 Hz 下三话题各 200/200 不丢、稳定 ~99 Hz。实现见 `sim2real/python/debug_publisher.py`。
+
+## 配置环境
+创建虚拟环境时，需要直接指定python的版本
+```bash
+conda create -n sim2real_setup_test python=3.10 -y
+```
+然后进入 Wheel-Legged-Gym 仓库根目录，运行以下命令配置好环境
+```bash
+pip install -e .
+```

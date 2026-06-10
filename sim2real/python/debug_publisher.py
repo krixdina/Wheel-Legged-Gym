@@ -1,27 +1,18 @@
 """Optional ROS2 debug publisher for sim2real bring-up (debug-only).
 
-This module is imported ONLY when config.debug is true (see deploy.run), so the
-normal deployment keeps running on Python 3.7 / isaac_gym with no ROS2 dependency.
-When enabled it publishes, on every fresh control step, three things so a live
-serial trace can be visualized (Foxglove / PlotJuggler / rqt_plot) and compared
-against the sim2sim reference trace field-for-field:
+This module is imported ONLY when config.debug is true
 
     /sim2real_debug/state          (DebugState)  - decoded uplink state (21 raw values)
     /sim2real_debug/action_raw     (DebugAction) - clipped raw policy output
     /sim2real_debug/action_scaled  (DebugAction) - scaled physical downlink command
 
-Non-blocking by construction (the 100 Hz control loop must never stall on ROS):
-
-    control loop --put_nowait--> bounded queue --drain--> worker thread --publish-->
+Non-blocking by construction (the 100 Hz control loop must never stall when using ROS):
 
 publish_step() only enqueues one record per control step and drops it if the queue
-is full (debug data is best-effort); it never calls into rclpy. The worker thread
-owns the queue draining and all message publishing. The node and publishers are
-created in the constructor so a missing ROS2 environment surfaces immediately as a
-clear error at start-up rather than silently inside the loop.
-
-Requires a Python 3.10 environment with ROS2 Humble sourced and the
-wheel_legged_msgs package built and sourced; see sim2real/ros2/README.md.
+is full (debug data is best-effort); This function never calls into rclpy. 
+This keeps ROS2/DDS serialization, publish scheduling, and possible blocking away from
+the control path; the 100 Hz loop only performs a queue write, so debug visualization cannot slow it down.
+The worker thread owns the queue draining and all message publishing. 
 """
 import queue
 import threading
@@ -64,6 +55,7 @@ class DebugPublisher:
         self._pub_scaled = self._node.create_publisher(DebugAction, TOPIC_ACTION_SCALED, qos)
 
         self._queue = queue.Queue(maxsize=QUEUE_MAXSIZE)
+        # 线程间同步信号，用于通知工作线程停止运行
         self._stop = threading.Event()
         self._dropped = 0  # samples dropped because the queue was full
         # Daemon so a hung worker can never keep the process alive past shutdown().
@@ -73,13 +65,9 @@ class DebugPublisher:
     def publish_step(self, state, raw_action, scaled_action):
         """Enqueue one control step's data; non-blocking, drops on a full queue.
 
-        state:         dict of raw uplink arrays from decode_uplink (the 21 values).
+        state:         dict of raw uplink arrays from decode_uplink 
         raw_action:    length-6 clipped policy output.
-        scaled_action: length-6 scaled physical command (the downlink payload).
-
-        Each argument is a fresh array/dict produced this step by the deploy loop
-        (never mutated in place afterwards), so the references are safe to hand to
-        the worker thread without copying.
+        scaled_action: length-6 scaled physical command
         """
         if self._stop.is_set():
             return

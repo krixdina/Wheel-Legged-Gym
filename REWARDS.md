@@ -261,7 +261,7 @@
 ## 6. scripts
 ```
 tensorboard --logdir logs/wheel_legged_vmc_fyt --host 0.0.0.0 --port 6007 --reload_interval 5
-tensorboard --logdir logs/experiment_data --host 0.0.0.0 --port 6007 --reload_interval 5
+tensorboard --logdir logs/experiment_data_whole_fyt --host 0.0.0.0 --port 6007 --reload_interval 5
 python wheel_legged_gym/scripts/train.py --task=wheel_legged_vmc_flat_fyt --num_envs=4096 --headless
 python wheel_legged_gym/scripts/play_keyboard.py \
   --task wheel_legged_vmc_fyt \
