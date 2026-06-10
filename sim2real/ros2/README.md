@@ -10,9 +10,8 @@
 ## 为什么必须用 Python 3.10 环境
 
 ROS2 Humble 的 `rclpy` 是为 **Python 3.10** 构建的，无法在 `isaac_gym`(Python 3.7) 中导入。
-sim2real 部署本身支持 Python 3.7–3.10（见 `sim2real/setup.py`），所以**开启 debug 时，请在
-Python 3.10 环境中运行部署**（例如 conda 环境 `sim2real_deploy_py310_test`，其中
-`torch/pyserial/yaml` 与 `rclpy` 已验证可共存）。非调试部署不受此限制。
+NUC 端 `sim2real/setup.py` 已约束部署环境为 Python 3.10，因此调试部署请在 Python 3.10 环境中运行
+（例如 conda 环境 `sim2real_deploy_py310_test`，其中 `torch/pyserial/yaml` 与 `rclpy` 已验证可共存）。
 
 ## 自定义消息
 
@@ -48,6 +47,24 @@ python sim2real/python/deploy.py --device cpu
 ```
 
 启动时会打印 `debug=true: publishing ... to ROS2 (/sim2real_debug/*)`。
+
+## 无串口上位机自测
+
+在连接下位机之前，可以先发布一段构造的 sim2real debug 数据，验证 Python 3.10、ROS2 Humble、
+`wheel_legged_msgs`、三个 topic 和后台发布线程是否工作正常。该命令不打开串口、不加载策略模型、不下发动作：
+
+```bash
+conda activate sim2real_deploy_py310_test
+source /opt/ros/humble/setup.bash
+source sim2real/ros2/install/setup.bash
+python sim2real/python/debug_fake_data.py --seconds 10 --vx 0.5
+```
+
+如果已安装 `sim2real/setup.py` 中的 console script，也可以运行：
+
+```bash
+sim2real-debug-fake-data --seconds 10 --vx 0.5
+```
 
 ## 查看数据
 

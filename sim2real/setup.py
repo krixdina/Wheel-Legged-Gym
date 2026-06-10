@@ -27,6 +27,8 @@ setup(
     py_modules=[
         "config",
         "controller",
+        "debug_fake_data",
+        "debug_publisher",
         "deploy",
         "export_onnx",
         "policy",
@@ -46,6 +48,7 @@ setup(
     entry_points={
         "console_scripts": [
             "sim2real-deploy=deploy:main",
+            "sim2real-debug-fake-data=debug_fake_data:main",
             "sim2real-export-onnx=export_onnx:main",
             "sim2real-probe-serial=probe_serial:main",
         ]
