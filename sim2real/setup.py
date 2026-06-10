@@ -2,25 +2,20 @@
 
 This setup file is intentionally separate from the repository-root setup.py:
 the root package targets Isaac Gym training, while this package only installs
-the dependencies needed on the NUC deployment machine.
+the dependencies needed on the NUC deployment machine. The NUC-side package is
+intended to run with ROS2 Humble debug support, whose rclpy binaries target the
+system Python 3.10 ABI on Ubuntu 22.04.
 """
 
 from setuptools import setup
 
 
 CPU_TORCH_1131 = [
-    "torch @ https://download.pytorch.org/whl/cpu/torch-1.13.1%2Bcpu-cp37-cp37m-linux_x86_64.whl ; "
-    'python_version == "3.7" and platform_system == "Linux" and platform_machine == "x86_64"',
-    "torch @ https://download.pytorch.org/whl/cpu/torch-1.13.1%2Bcpu-cp38-cp38-linux_x86_64.whl ; "
-    'python_version == "3.8" and platform_system == "Linux" and platform_machine == "x86_64"',
-    "torch @ https://download.pytorch.org/whl/cpu/torch-1.13.1%2Bcpu-cp39-cp39-linux_x86_64.whl ; "
-    'python_version == "3.9" and platform_system == "Linux" and platform_machine == "x86_64"',
     "torch @ https://download.pytorch.org/whl/cpu/torch-1.13.1%2Bcpu-cp310-cp310-linux_x86_64.whl ; "
     'python_version == "3.10" and platform_system == "Linux" and platform_machine == "x86_64"',
 ]
 
 NUMPY = [
-    "numpy==1.19.5 ; python_version < '3.10'",
     "numpy==1.23.5 ; python_version >= '3.10' and python_version < '3.11'",
 ]
 
@@ -39,7 +34,7 @@ setup(
         "serial_comm",
     ],
     package_dir={"": "python"},
-    python_requires=">=3.7,<3.11",
+    python_requires=">=3.10,<3.11",
     install_requires=[
         *NUMPY,
         "PyYAML==6.0",
