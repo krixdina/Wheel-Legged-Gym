@@ -21,6 +21,10 @@ import numpy as np
 from config import CONFIG
 
 
+class InvalidUplinkState(ValueError):
+    """Raised when a decoded uplink frame is not a physically plausible state."""
+
+
 class Sim2RealController:
     """Build (obs, obs_history) from raw uplink state; track history + last action."""
 
@@ -46,6 +50,41 @@ class Sim2RealController:
         # _obs_history is lazily filled on the first observation so it repeats the first frame.
         self._last_action = np.zeros(self._num_actions, dtype=np.float32)
         self._obs_history = None
+
+    @staticmethod
+    def _validate_state(state):
+        """Reject garbage frames before scaling them into the policy observation.
+
+        With CRC disabled, a binary payload byte can occasionally look like SOF
+        during resync. The frame length/EOF check may then accept a false frame,
+        whose floats can be NaN/Inf or wildly outside the robot's physical range.
+        Dropping those frames keeps bad serial sync from contaminating policy IO.
+        """
+        for name, values in state.items():
+            arr = np.asarray(values, dtype=np.float32)
+            if not np.all(np.isfinite(arr)):
+                raise InvalidUplinkState(f"{name} contains non-finite values: {arr}")
+
+        gravity_norm = float(np.linalg.norm(state["projected_gravity"]))
+        if not 0.5 <= gravity_norm <= 1.5:
+            raise InvalidUplinkState(f"projected_gravity norm {gravity_norm:.3g} is not near 1")
+
+        l0 = np.asarray(state["L0"], dtype=np.float32)
+        if np.any((l0 < 0.01) | (l0 > 2.0)):
+            raise InvalidUplinkState(f"L0 out of plausible range [0.01, 2.0] m: {l0}")
+
+        bounded_fields = {
+            "base_ang_vel": 1.0e3,
+            "commands": 1.0e3,
+            "theta0": 1.0e3,
+            "theta0_dot": 1.0e4,
+            "L0_dot": 1.0e4,
+            "wheel_vel": 1.0e4,
+        }
+        for name, limit in bounded_fields.items():
+            arr = np.asarray(state[name], dtype=np.float32)
+            if np.any(np.abs(arr) > limit):
+                raise InvalidUplinkState(f"{name} magnitude exceeds {limit:g}: {arr}")
 
     def _build_observation(self, state):
         """Raw uplink state dict -> scaled, clipped 27-dim observation (float32).
@@ -76,6 +115,7 @@ class Sim2RealController:
         On the first call the history is filled by repeating the first observation,
         matching the env reset that tiles the first proprio frame.
         """
+        self._validate_state(state)
         obs = self._build_observation(state)
         if self._obs_history is None:
             self._obs_history = np.tile(obs, self._history_length)

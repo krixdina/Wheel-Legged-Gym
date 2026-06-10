@@ -28,7 +28,7 @@ import numpy as np
 import serial  # pyserial; SerialException is raised when the port cannot be opened
 
 from config import CONFIG
-from controller import Sim2RealController
+from controller import InvalidUplinkState, Sim2RealController
 from policy import SequencePolicy
 from serial_comm import RobotSerialLink
 
@@ -96,30 +96,50 @@ def run(device="cpu"):
     neutral_action = controller.scale_action(np.zeros(num_actions, dtype=np.float32))
     action = neutral_action.copy()  # physical command re-sent on a missed frame
     missed = 0
+    invalid_frames = 0
 
-    print(f"sim2real deploy: {1.0 / period:.0f} Hz, device={device}. Ctrl-C to stop.")
+    frame_cfg = CONFIG["frame"]
+    print(
+        f"sim2real deploy: {1.0 / period:.0f} Hz, device={device}, "
+        f"port={CONFIG['serial']['port']}, crc8={frame_cfg['use_crc8']}. Ctrl-C to stop."
+    )
     try:
         while True:
             t0 = time.time()
 
             state = link.poll()
             if state is not None:
-                missed = 0
-                obs, obs_history = controller.observe(state)
-                # Clip the RAW network output, store it as last_action (it feeds the next observation),
-                # then scale it into the physical downlink command.
-                raw_action = np.clip(policy.act(obs, obs_history), -clip_action, clip_action)
-                controller.set_last_action(raw_action)
-                action = controller.scale_action(raw_action)
-                # Debug only: hand this step's state and both actions to ROS2.
-                # Non-blocking (enqueue + drop-on-full); no-op when debug is off.
-                if debug_publisher is not None:
-                    debug_publisher.publish_step(state, raw_action, action)
+                try:
+                    obs, obs_history = controller.observe(state)
+                except InvalidUplinkState as exc:
+                    invalid_frames += 1
+                    missed += 1
+                    if invalid_frames <= 5 or invalid_frames % 50 == 0:
+                        print(f"invalid uplink frame dropped ({invalid_frames}): {exc}")
+                    if missed >= max_missed_frames:
+                        raise TimeoutError(
+                            f"no valid uplink frame for {missed} steps; "
+                            "check frame length/CRC/SOF/EOF and payload field order"
+                        )
+                else:
+                    missed = 0
+                    # Clip the RAW network output, store it as last_action (it feeds the next observation),
+                    # then scale it into the physical downlink command.
+                    raw_action = np.clip(policy.act(obs, obs_history), -clip_action, clip_action)
+                    controller.set_last_action(raw_action)
+                    action = controller.scale_action(raw_action)
+                    # Debug only: hand this step's state and both actions to ROS2.
+                    # Non-blocking (enqueue + drop-on-full); no-op when debug is off.
+                    if debug_publisher is not None:
+                        debug_publisher.publish_step(state, raw_action, action)
             else:
                 # No fresh frame this step: re-send the last physical command.
                 missed += 1
                 if missed >= max_missed_frames:
-                    print(f"no uplink frame for {missed} steps; link lost")
+                    raise TimeoutError(
+                        f"no uplink frame for {missed} steps; "
+                        "serial bytes may still be present, but no frame matched the configured protocol"
+                    )
 
             link.send_action(action)
 

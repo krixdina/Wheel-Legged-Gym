@@ -35,6 +35,7 @@ setup(
         "deploy",
         "export_onnx",
         "policy",
+        "probe_serial",
         "serial_comm",
     ],
     package_dir={"": "python"},
@@ -51,6 +52,7 @@ setup(
         "console_scripts": [
             "sim2real-deploy=deploy:main",
             "sim2real-export-onnx=export_onnx:main",
+            "sim2real-probe-serial=probe_serial:main",
         ]
     },
 )
