@@ -44,4 +44,3 @@ conda run -n isaac_gym tensorboard --logdir sim2sim/reference_data/runs
 
 横轴为控制步序号；同一 step 上 `state[k]` 对应产生 `action[k]`，与实时循环一致。
 
-很好，现在我已经在。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。中记录了机器人从倒地到站立

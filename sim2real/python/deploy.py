@@ -103,6 +103,12 @@ def run(device="cpu"):
         f"sim2real deploy: {1.0 / period:.0f} Hz, device={device}, "
         f"port={CONFIG['serial']['port']}, crc8={frame_cfg['use_crc8']}. Ctrl-C to stop."
     )
+    # missed 用于统计连续多少个控制周期没有从串口中解析出可用于策略推理的有效状态，
+    # 这期间并不会进行策略推理，而是持续重发上一条 action (初始为 neutral_action)，
+    # 直到连续 missed 达到 max_missed_frames ，就立刻关闭串口并退出循环，停止发送命令，避免策略推理得到的错误数据使损坏机器人
+    #
+    # invalid_frames 用于统计在解析串口数据时，虽然成功解析出了一帧数据，但这帧数据的物理数值不合理
+    # 如 projected_gravity 模长不接近 1，字段出现 NaN/Inf 等，这些帧会被丢弃
     try:
         while True:
             t0 = time.time()

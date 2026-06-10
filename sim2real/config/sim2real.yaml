@@ -5,7 +5,7 @@
 # ---- 串口 ----
 # port 建议用 udev 规则绑定为固定名称，避免重新插拔后串口号变化。
 serial:
-  port: /dev/ttyUSB0
+  port: /dev/ttyACM0
   baudrate: 115200
 
 # ---- 帧协议（必须与下位机固件约定一致）----
@@ -14,7 +14,7 @@ serial:
 frame:
   sof: 0xFF          # 帧头字节
   eof: 0x0D          # 帧尾字节
-  use_crc8: true     # 校验总开关；false 则无校验字节、不校验
+  use_crc8: false     # 校验总开关；false 则无校验字节、不校验
   crc8_poly: 0x07    # CRC-8 多项式（仅 use_crc8=true 时使用，固件须一致）
   crc8_init: 0x00    # CRC-8 初值
   # payload 二进制布局，使用小端序（struct 格式串），字段顺序由协议固定。

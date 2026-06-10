@@ -197,6 +197,7 @@ class RobotSerialLink:
 
     def poll(self):
         payloads = self._uplink.feed(self._transport.read_available())
+        # 返回最新接收到的一帧 payload
         return decode_uplink(payloads[-1], self._uplink_format) if payloads else None
 
     def send_action(self, action):
