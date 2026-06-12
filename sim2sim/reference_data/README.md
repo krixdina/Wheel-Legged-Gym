@@ -12,13 +12,13 @@
 conda run -n isaac_gym python sim2sim/reference_data/collect_reference_data.py --seconds 30 --vx 0.5
 ```
 
-参数：`--seconds`（时长，默认 30）、`--vx/--wz/--height`（命令）、`--logdir`（父目录，默认 `runs/`）、
+参数：`--seconds`（时长，默认 30）、`--vx/--wz/--height`（命令）、`--logdir`（父目录，默认 `reference_data/`）、
 `--run_name`（自定义本次 run 子目录名，覆盖自动命名）。
 
 每次采集都会在 `--logdir` 下生成**单独的命名子目录**作为本次 run，名称自动带上日期时间与命令值，例如：
 
 ```text
-runs/Jun09_20-15-30_vx0p50_wz0p00_h0p18_t30s/
+reference_data/Jun09_20-15-30_vx0p50_wz0p00_h0p18_t30s/
 ```
 
 即"`月日_时-分-秒_vx<值>_wz<值>_h<值>_t<时长>s`"。日期时间格式（`%b%d_%H-%M-%S`）与
@@ -29,7 +29,7 @@ runs/Jun09_20-15-30_vx0p50_wz0p00_h0p18_t30s/
 ## 在浏览器查看
 
 ```bash
-conda run -n isaac_gym tensorboard --logdir sim2sim/reference_data/runs
+conda run -n isaac_gym tensorboard --logdir sim2sim/reference_data/reference_data
 # 打开 http://localhost:6006
 ```
 
@@ -43,4 +43,3 @@ conda run -n isaac_gym tensorboard --logdir sim2sim/reference_data/runs
   `l0_ref_{L,R}` [m]、`wheel_vel_ref_{L,R}` [rad/s]，缩放公式与 controller / sim2real 一致。
 
 横轴为控制步序号；同一 step 上 `state[k]` 对应产生 `action[k]`，与实时循环一致。
-

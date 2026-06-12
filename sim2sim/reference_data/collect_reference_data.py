@@ -38,7 +38,7 @@ import mujoco
 import controller as ctrl
 import play_mujoco as pm
 
-DEFAULT_LOGDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs")
+DEFAULT_LOGDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reference_data")
 
 # Per-leg names for the 6-dim action, in the downlink order.
 ACTION_NAMES = ["L_theta", "L_l0", "L_wheel", "R_theta", "R_l0", "R_wheel"]
