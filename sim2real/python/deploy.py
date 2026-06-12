@@ -17,8 +17,10 @@ Per control step (config.control_timing.policy_rate_hz, e.g. 100 Hz):
 
 Lost-frame policy: re-send the last command. If too many consecutive frames are
 missed (config.control_timing.max_missed_frames) the link is treated as lost --
-the loop stops and sends the neutral physical command (scaled zero action) so the
-lower machine is not driven on stale state.
+the loop stops and attempts to send the neutral physical command (scaled zero
+action). If the USB serial device has already disappeared, that final command
+cannot reach the lower machine, so the cleanup path reports the failed send
+instead of crashing with a second traceback.
 
 """
 import argparse
@@ -31,6 +33,8 @@ from config import CONFIG
 from controller import InvalidUplinkState, Sim2RealController
 from policy import SequencePolicy
 from serial_comm import RobotSerialLink
+
+SERIAL_ERRORS = (serial.SerialException, OSError)
 
 
 def _open_serial_link(reconnect_interval_s):
@@ -46,9 +50,34 @@ def _open_serial_link(reconnect_interval_s):
     while True:
         try:
             return RobotSerialLink()
-        except serial.SerialException:
+        except SERIAL_ERRORS:
             print(f"无法找到串口 {port}，{reconnect_interval_s:g}s 后重试…（Ctrl-C 退出）")
             time.sleep(reconnect_interval_s)
+
+
+def _send_action_checked(link, action, context):
+    """Send one action; convert serial disappearance into a controlled shutdown."""
+    try:
+        link.send_action(action)
+    except SERIAL_ERRORS as exc:
+        raise ConnectionError(f"{context}: serial write failed: {exc}") from exc
+
+
+def _try_send_action(link, action, context):
+    """Best-effort send used during shutdown, where the USB device may be gone."""
+    try:
+        link.send_action(action)
+    except SERIAL_ERRORS as exc:
+        print(f"warning: {context}: serial write failed: {exc}")
+        return False
+    return True
+
+
+def _try_close_link(link):
+    try:
+        link.close()
+    except SERIAL_ERRORS as exc:
+        print(f"warning: serial close failed: {exc}")
 
 
 def _make_debug_publisher():
@@ -113,7 +142,11 @@ def run(device="cpu"):
         while True:
             t0 = time.time()
 
-            state = link.poll()
+            try:
+                state = link.poll()
+            except SERIAL_ERRORS as exc:
+                raise ConnectionError(f"serial read failed: {exc}") from exc
+
             if state is not None:
                 try:
                     obs, obs_history = controller.observe(state)
@@ -147,21 +180,26 @@ def run(device="cpu"):
                         "serial bytes may still be present, but no frame matched the configured protocol"
                     )
 
-            link.send_action(action)
+            _send_action_checked(link, action, "send action")
 
             # Hold the control rate.
             sleep_left = period - (time.time() - t0)
             if sleep_left > 0:
                 time.sleep(sleep_left)
-    except (KeyboardInterrupt, TimeoutError) as exc:
+    except (KeyboardInterrupt, TimeoutError, ConnectionError) as exc:
         print(f"\nstopping: {exc if str(exc) else 'interrupted'}")
     finally:
-        # Always leave the robot with the neutral physical command, then close.
-        link.send_action(neutral_action)
-        link.close()
+        # Best effort: if the USB serial device already disappeared, this cannot
+        # reach the lower machine. Avoid masking the real link-loss reason with a
+        # second traceback from the cleanup path.
+        neutral_sent = _try_send_action(link, neutral_action, "send neutral action")
+        _try_close_link(link)
         if debug_publisher is not None:
             debug_publisher.shutdown()
-        print("sent neutral action and closed serial port.")
+        if neutral_sent:
+            print("sent neutral action and closed serial port.")
+        else:
+            print("serial port closed; neutral action could not be sent because the link was already lost.")
 
 
 def parse_args():
