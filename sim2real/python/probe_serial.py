@@ -9,9 +9,11 @@ import argparse
 import struct
 import time
 
+import serial
+
 from config import CONFIG
 from controller import InvalidUplinkState, Sim2RealController
-from serial_comm import FrameCodec, SerialLinkError, SerialTransport, decode_uplink
+from serial_comm import FrameCodec, SerialTransport, decode_uplink
 
 
 def parse_args():
@@ -44,10 +46,9 @@ def main():
     first_state = None
     first_invalid = None
 
-    transport = None
+    transport = SerialTransport(serial_cfg["port"], serial_cfg["baudrate"])
+    deadline = time.time() + args.seconds
     try:
-        transport = SerialTransport(serial_cfg["port"], serial_cfg["baudrate"])
-        deadline = time.time() + args.seconds
         while time.time() < deadline:
             chunk = transport.read_available()
             if not chunk:
@@ -67,15 +68,11 @@ def main():
                     valid += 1
                     if first_state is None:
                         first_state = state
-    except SerialLinkError as exc:
+    except serial.SerialException as exc:
         print(f"serial error: {exc}")
         return 1
     finally:
-        if transport is not None:
-            try:
-                transport.close()
-            except SerialLinkError as exc:
-                print(f"serial close warning: {exc}")
+        transport.close()
 
     print(f"bytes_read={bytes_read}, decoded_frames={decoded}, valid_states={valid}, invalid_states={invalid}")
     if first_state is not None:
