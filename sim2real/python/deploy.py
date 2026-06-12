@@ -20,28 +20,25 @@ missed (config.control_timing.max_missed_frames) the link is treated as lost --
 the loop stops and attempts to send the neutral physical command (scaled zero
 action). If the USB serial device has already disappeared, that final command
 cannot reach the lower machine, so the cleanup path reports the failed send
-instead of crashing with a second traceback.
+instead of crashing with a second error traceback.
 
 """
 import argparse
 import time
 
 import numpy as np
-import serial  # pyserial; SerialException is raised when the port cannot be opened
 
 from config import CONFIG
 from controller import InvalidUplinkState, Sim2RealController
 from policy import SequencePolicy
-from serial_comm import RobotSerialLink
-
-SERIAL_ERRORS = (serial.SerialException, OSError)
+from serial_comm import RobotSerialLink, SerialLinkError
 
 
 def _open_serial_link(reconnect_interval_s):
     """Open the serial link, retrying until the port is available.
 
-    Opening fails (raising serial.SerialException) when the device is not
-    present, Instead of crashing with a traceback we print
+    Opening fails (raising SerialLinkError) when the device is not present.
+    Instead of crashing with a traceback we print
     a clear "no serial port found" message and retry every reconnect_interval_s
     seconds, so the deployment can be started before the cable is connected and
     recovers on hot-plug. Ctrl-C during the wait exits cleanly.
@@ -50,25 +47,17 @@ def _open_serial_link(reconnect_interval_s):
     while True:
         try:
             return RobotSerialLink()
-        except SERIAL_ERRORS:
+        except SerialLinkError:
             print(f"无法找到串口 {port}，{reconnect_interval_s:g}s 后重试…（Ctrl-C 退出）")
             time.sleep(reconnect_interval_s)
-
-
-def _send_action_checked(link, action, context):
-    """Send one action; convert serial disappearance into a controlled shutdown."""
-    try:
-        link.send_action(action)
-    except SERIAL_ERRORS as exc:
-        raise ConnectionError(f"{context}: serial write failed: {exc}") from exc
 
 
 def _try_send_action(link, action, context):
     """Best-effort send used during shutdown, where the USB device may be gone."""
     try:
         link.send_action(action)
-    except SERIAL_ERRORS as exc:
-        print(f"warning: {context}: serial write failed: {exc}")
+    except SerialLinkError as exc:
+        print(f"warning: {context}: {exc}")
         return False
     return True
 
@@ -76,8 +65,26 @@ def _try_send_action(link, action, context):
 def _try_close_link(link):
     try:
         link.close()
-    except SERIAL_ERRORS as exc:
-        print(f"warning: serial close failed: {exc}")
+    except SerialLinkError as exc:
+        print(f"warning: {exc}")
+
+
+def _observe_valid_state(controller, state, invalid_frames, missed, max_missed_frames):
+    """Build policy inputs from one uplink state, or count/drop an invalid frame."""
+    try:
+        obs, obs_history = controller.observe(state)
+    except InvalidUplinkState as exc:
+        invalid_frames += 1
+        missed += 1
+        if invalid_frames <= 5 or invalid_frames % 50 == 0:
+            print(f"invalid uplink frame dropped ({invalid_frames}): {exc}")
+        if missed >= max_missed_frames:
+            raise TimeoutError(
+                f"no valid uplink frame for {missed} steps; "
+                "check frame length/CRC/SOF/EOF and payload field order"
+            )
+        return None, None, invalid_frames, missed
+    return obs, obs_history, invalid_frames, 0
 
 
 def _make_debug_publisher():
@@ -142,26 +149,12 @@ def run(device="cpu"):
         while True:
             t0 = time.time()
 
-            try:
-                state = link.poll()
-            except SERIAL_ERRORS as exc:
-                raise ConnectionError(f"serial read failed: {exc}") from exc
-
+            state = link.poll()
             if state is not None:
-                try:
-                    obs, obs_history = controller.observe(state)
-                except InvalidUplinkState as exc:
-                    invalid_frames += 1
-                    missed += 1
-                    if invalid_frames <= 5 or invalid_frames % 50 == 0:
-                        print(f"invalid uplink frame dropped ({invalid_frames}): {exc}")
-                    if missed >= max_missed_frames:
-                        raise TimeoutError(
-                            f"no valid uplink frame for {missed} steps; "
-                            "check frame length/CRC/SOF/EOF and payload field order"
-                        )
-                else:
-                    missed = 0
+                obs, obs_history, invalid_frames, missed = _observe_valid_state(
+                    controller, state, invalid_frames, missed, max_missed_frames
+                )
+                if obs is not None:
                     # Clip the RAW network output, store it as last_action (it feeds the next observation),
                     # then scale it into the physical downlink command.
                     raw_action = np.clip(policy.act(obs, obs_history), -clip_action, clip_action)
@@ -180,13 +173,13 @@ def run(device="cpu"):
                         "serial bytes may still be present, but no frame matched the configured protocol"
                     )
 
-            _send_action_checked(link, action, "send action")
+            link.send_action(action)
 
             # Hold the control rate.
             sleep_left = period - (time.time() - t0)
             if sleep_left > 0:
                 time.sleep(sleep_left)
-    except (KeyboardInterrupt, TimeoutError, ConnectionError) as exc:
+    except (KeyboardInterrupt, TimeoutError, SerialLinkError) as exc:
         print(f"\nstopping: {exc if str(exc) else 'interrupted'}")
     finally:
         # Best effort: if the USB serial device already disappeared, this cannot

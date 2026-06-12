@@ -43,6 +43,13 @@ _UPLINK_SLICES = {
 }
 
 
+_SERIAL_ERRORS = (serial.SerialException, OSError)
+
+
+class SerialLinkError(ConnectionError):
+    """Raised when the configured serial link cannot be opened, read, written, or closed."""
+
+
 class SerialTransport:
     """pyserial byte stream -- the only layer that touches the device.
 
@@ -52,28 +59,40 @@ class SerialTransport:
     """
 
     def __init__(self, port, baudrate):
-        self._serial = serial.Serial(
-            port=port,
-            baudrate=baudrate,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            rtscts=False,
-            dsrdtr=False,
-            timeout=0.0,
-        )
+        try:
+            self._serial = serial.Serial(
+                port=port,
+                baudrate=baudrate,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                rtscts=False,
+                dsrdtr=False,
+                timeout=0.0,
+            )
+        except _SERIAL_ERRORS as exc:
+            raise SerialLinkError(f"open serial port {port} failed: {exc}") from exc
 
     def read_available(self):
         """Return all bytes currently buffered (never blocks)."""
-        pending = self._serial.in_waiting
-        # 如果串口接收缓冲区里有数据，就把这些数据读出来；如果没有数据，就返回一个空的 bytes。
-        return self._serial.read(pending) if pending else b""
+        try:
+            pending = self._serial.in_waiting
+            # 如果串口接收缓冲区里有数据，就把这些数据读出来；如果没有数据，就返回一个空的 bytes。
+            return self._serial.read(pending) if pending else b""
+        except _SERIAL_ERRORS as exc:
+            raise SerialLinkError(f"read serial failed: {exc}") from exc
 
     def write(self, data):
-        self._serial.write(data)
+        try:
+            self._serial.write(data)
+        except _SERIAL_ERRORS as exc:
+            raise SerialLinkError(f"write serial failed: {exc}") from exc
 
     def close(self):
-        self._serial.close()
+        try:
+            self._serial.close()
+        except _SERIAL_ERRORS as exc:
+            raise SerialLinkError(f"close serial failed: {exc}") from exc
 
 
 class FrameCodec:
